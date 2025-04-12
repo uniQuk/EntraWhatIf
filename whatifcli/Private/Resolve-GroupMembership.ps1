@@ -45,6 +45,7 @@ function Resolve-GroupMembership {
             Groups                 = @()
             MemberOfSpecificGroups = @{}
             Success                = $false
+            Error                  = $null
         }
 
         # Use transitive members if nested groups are requested
