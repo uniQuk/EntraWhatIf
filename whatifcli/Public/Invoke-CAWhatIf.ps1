@@ -283,18 +283,44 @@ function Invoke-CAWhatIf {
 
             # Only evaluate enabled or report-only policies
             if ($policy.State -eq "enabled" -or ($policy.State -eq "enabledForReportingButNotEnforced" -and $IncludeReportOnly) -or $policy.State -eq "disabled") {
-                # Enable verbose output if Diagnostic is specified
+
+                # --- CORE EVALUATION LOGIC (MOVED OUTSIDE DIAGNOSTIC BLOCK) ---
+                Write-Verbose "Evaluating policy: $($policy.DisplayName) (ID: $($policy.Id))" # General evaluation message
+
+                # Check if policy applies to this sign-in scenario
+                $policyEvaluation = Resolve-CACondition -Policy $policy -UserContext $UserContext -ResourceContext $ResourceContext -DeviceContext $DeviceContext -RiskContext $RiskContext -LocationContext $LocationContext
+
+                $result.EvaluationDetails = $policyEvaluation.EvaluationDetails
+                $result.Applies = $policyEvaluation.Applies
+
+                # If policy applies, evaluate grant and session controls
+                if ($result.Applies) {
+                    $grantControlResult = Resolve-CAGrantControl -Policy $policy -UserContext $UserContext -DeviceContext $DeviceContext
+                    $result.AccessResult = $grantControlResult.AccessResult
+                    $result.GrantControlsRequired = $grantControlResult.GrantControlsRequired
+
+                    # If access is granted or conditional, check session controls
+                    if ($result.AccessResult -eq "Granted" -or $result.AccessResult -eq "ConditionallyGranted") {
+                        $sessionControlResult = Resolve-CASessionControl -Policy $policy
+                        $result.SessionControlsApplied = $sessionControlResult.SessionControlsApplied
+                    }
+                }
+                # --- END OF CORE EVALUATION LOGIC ---
+
+
+                # --- DIAGNOSTIC LOGGING (Remains conditional) ---
                 if ($Diagnostic) {
                     $verbosePreference = $VerbosePreference
-                    $VerbosePreference = 'Continue'
-                    Write-Verbose "Evaluating policy: $($policy.DisplayName) (ID: $($policy.Id))"
-                    Write-Verbose "User ID being evaluated: $UserId"
+                    $VerbosePreference = 'Continue' # Temporarily enable verbose for this section
+
+                    Write-Verbose "--- Diagnostic Start: Policy '$($policy.DisplayName)' ---"
+                    Write-Verbose "User ID being evaluated: $UserId ($UserGuid)"
+                    Write-Verbose "Policy State: $($policy.State)"
+                    Write-Verbose "Include Report-Only: $IncludeReportOnly"
 
                     # Enhanced diagnostic for user exclusion checking
                     if ($policy.Conditions.Users.ExcludeUsers) {
-                        Write-Verbose ("Policy excludes these users: {0}" -f ($policy.Conditions.Users.ExcludeUsers -join ', '))
-
-                        # Process excluded users to show readable names
+                        Write-Verbose ("Policy excludes these users/GUIDs: {0}" -f ($policy.Conditions.Users.ExcludeUsers -join ', '))
                         $excludedUserDetails = @()
                         foreach ($excludedUser in $policy.Conditions.Users.ExcludeUsers) {
                             # Try to resolve excluded user to get more details
@@ -342,13 +368,11 @@ function Invoke-CAWhatIf {
                                 }
                             }
                         }
+                        Write-Verbose ("Excluded users (resolved): {0}" -f ($excludedUserDetails -join ", "))
 
-                        if ($Diagnostic) {
-                            Write-Verbose ("Excluded users (resolved): {0}" -f ($excludedUserDetails -join ", "))
-                        }
                     }
                     else {
-                        Write-Verbose "No excluded users for this policy"
+                        Write-Verbose "No excluded users defined for this policy."
                     }
 
                     # Check for groups in the policy conditions
@@ -356,100 +380,74 @@ function Invoke-CAWhatIf {
                         # Process included groups
                         if ($policy.Conditions.Users.IncludeGroups) {
                             Write-Verbose ("Policy includes these groups: {0}" -f ($policy.Conditions.Users.IncludeGroups -join ', '))
-
-                            # Check if user is a member of any included groups
                             $includedGroupChecks = Resolve-GroupMembership -UserId $UserGuid -GroupIds $policy.Conditions.Users.IncludeGroups
-
                             if ($includedGroupChecks.Success) {
-                                $memberOfAnyIncludedGroup = $false
-                                $groupDetails = @()
-
+                                $memberOfAnyIncludedGroup = $false; $groupDetails = @()
                                 foreach ($group in $includedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" })
-
-                                    if ($group.IsMember) {
-                                        $memberOfAnyIncludedGroup = $true
-                                    }
+                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyIncludedGroup = $true }
                                 }
-
                                 Write-Verbose ("User is member of included groups: {0}" -f $memberOfAnyIncludedGroup)
-                                if ($Diagnostic) {
-                                    Write-Verbose ("Included groups (resolved): {0}" -f ($groupDetails -join ", "))
-                                }
+                                Write-Verbose ("Included groups checks (resolved): {0}" -f ($groupDetails -join ", "))
                             }
+                            else { Write-Warning "Could not resolve included group membership for diagnostic." }
                         }
+                        else { Write-Verbose "No included groups defined." }
 
                         # Process excluded groups
                         if ($policy.Conditions.Users.ExcludeGroups) {
                             Write-Verbose ("Policy excludes these groups: {0}" -f ($policy.Conditions.Users.ExcludeGroups -join ', '))
-
-                            # Check if user is a member of any excluded groups
                             $excludedGroupChecks = Resolve-GroupMembership -UserId $UserGuid -GroupIds $policy.Conditions.Users.ExcludeGroups
-
                             if ($excludedGroupChecks.Success) {
-                                $memberOfAnyExcludedGroup = $false
-                                $groupDetails = @()
-
+                                $memberOfAnyExcludedGroup = $false; $groupDetails = @()
                                 foreach ($group in $excludedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" })
-
-                                    if ($group.IsMember) {
-                                        $memberOfAnyExcludedGroup = $true
-                                    }
+                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyExcludedGroup = $true }
                                 }
-
                                 Write-Verbose ("User is member of excluded groups: {0}" -f $memberOfAnyExcludedGroup)
-                                if ($Diagnostic) {
-                                    Write-Verbose ("Excluded groups (resolved): {0}" -f ($groupDetails -join ", "))
-                                }
+                                Write-Verbose ("Excluded groups checks (resolved): {0}" -f ($groupDetails -join ", "))
                             }
+                            else { Write-Warning "Could not resolve excluded group membership for diagnostic." }
                         }
+                        else { Write-Verbose "No excluded groups defined." }
                     }
+                    else { Write-Verbose "No include/exclude groups defined." }
 
-                    # Check if policy applies to this sign-in scenario
-                    $policyEvaluation = Resolve-CACondition -Policy $policy -UserContext $UserContext -ResourceContext $ResourceContext -DeviceContext $DeviceContext -RiskContext $RiskContext -LocationContext $LocationContext
 
-                    $result.EvaluationDetails = $policyEvaluation.EvaluationDetails
-                    $result.Applies = $policyEvaluation.Applies
-
-                    # Log the result of the policy evaluation
-                    if ($Diagnostic) {
-                        Write-Verbose "Policy applies: $($result.Applies)"
-                        Write-Verbose "User in scope: $($result.EvaluationDetails.UserInScope)"
-                        Write-Verbose "Resource in scope: $($result.EvaluationDetails.ResourceInScope)"
-                        Write-Verbose "Platform in scope: $($result.EvaluationDetails.DevicePlatformInScope)"
-                        Write-Verbose "Network in scope: $($result.EvaluationDetails.NetworkInScope)"
-                        Write-Verbose "Device state in scope: $($result.EvaluationDetails.DeviceStateInScope)"
-                        Write-Verbose "Risk levels in scope: $($result.EvaluationDetails.RiskLevelsInScope)"
-                    }
-
-                    # If policy applies, evaluate grant controls
+                    # Log the result of the policy evaluation (already performed above)
+                    Write-Verbose "--- Evaluation Result ---"
+                    Write-Verbose "Policy applies: $($result.Applies)"
+                    Write-Verbose "User in scope: $($result.EvaluationDetails.UserInScope)"
+                    Write-Verbose "Resource in scope: $($result.EvaluationDetails.ResourceInScope)"
+                    Write-Verbose "Platform in scope: $($result.EvaluationDetails.DevicePlatformInScope)"
+                    Write-Verbose "Network in scope: $($result.EvaluationDetails.NetworkInScope)"
+                    Write-Verbose "Device state in scope: $($result.EvaluationDetails.DeviceStateInScope)"
+                    Write-Verbose "Risk levels in scope: $($result.EvaluationDetails.RiskLevelsInScope)"
                     if ($result.Applies) {
-                        $grantControlResult = Resolve-CAGrantControl -Policy $policy -UserContext $UserContext -DeviceContext $DeviceContext
-
-                        $result.AccessResult = $grantControlResult.AccessResult
-                        $result.GrantControlsRequired = $grantControlResult.GrantControlsRequired
-
-                        # If access is granted, apply session controls
-                        if ($result.AccessResult -eq "Granted" -or $result.AccessResult -eq "ConditionallyGranted") {
-                            $sessionControlResult = Resolve-CASessionControl -Policy $policy
-                            $result.SessionControlsApplied = $sessionControlResult.SessionControlsApplied
+                        Write-Verbose "Access Result: $($result.AccessResult)"
+                        Write-Verbose "Grant Controls Required: $($result.GrantControlsRequired -join ', ')"
+                        Write-Verbose "Session Controls Applied: $($result.SessionControlsApplied -join ', ')"
+                    }
+                    else {
+                        # Add reasoning if available from Resolve-CACondition (assuming Reasons property exists)
+                        if ($result.EvaluationDetails.Reasons) {
+                            Write-Verbose "Reason Not Applied: $($result.EvaluationDetails.Reasons | ConvertTo-Json -Depth 1)"
+                        }
+                        else {
+                            Write-Verbose "Reason Not Applied: Check individual scope conditions."
                         }
                     }
+                    Write-Verbose "--- Diagnostic End: Policy '$($policy.DisplayName)' ---`n"
 
                     # Restore verbose preference
-                    if ($Diagnostic) {
-                        $VerbosePreference = $verbosePreference
-                    }
-                }
+                    $VerbosePreference = $verbosePreference
+                } # --- END OF DIAGNOSTIC LOGGING ---
 
                 $results += $result
             }
         }
 
         # Process results to determine final outcome
-        # Only consider enabled policies for the final access decision
-        $applicablePolicies = $results | Where-Object { $_.Applies -eq $true -and ($_.State -eq "enabled" -or ($_.State -eq "enabledForReportingButNotEnforced" -and $IncludeReportOnly)) }
+        # Consider ALL applicable policies for the final access decision, regardless of state
+        $applicablePolicies = $results | Where-Object { $_.Applies -eq $true }
 
         $finalResult = @{
             AccessAllowed    = $true
@@ -520,7 +518,7 @@ function Invoke-CAWhatIf {
             Write-Host "`nPolicy Counts:" -ForegroundColor Cyan
             Write-Host "Total Policies: $totalCount (Enabled: $enabledCount, Report-Only: $reportOnlyCount, Disabled: $disabledCount)" -ForegroundColor White
             Write-Host "Applicable to this scenario: $applicableCount" -ForegroundColor White
-            Write-Host "`nNote: Only enabled policies affect the final access decision." -ForegroundColor Yellow
+            # Write-Host "`nNote: Only enabled policies affect the final access decision." -ForegroundColor Yellow # Commented out as all applicable policies are now considered
 
             Write-Host "`nPolicy Evaluation Details:" -ForegroundColor Cyan
             Write-Host "===============================================================" -ForegroundColor Cyan
