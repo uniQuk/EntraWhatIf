@@ -10,7 +10,8 @@ if (-not (Get-Module WhatIfCA -ErrorAction SilentlyContinue)) {
 # Cross-platform temp directory
 $TempDir = if ($IsMacOS -or $IsLinux) {
     [System.IO.Path]::GetTempPath()
-} else {
+}
+else {
     $env:TEMP
 }
 
@@ -24,10 +25,14 @@ if (-not (Test-Path -Path (Split-Path -Path $OutputPath -Parent))) {
     New-Item -Path (Split-Path -Path $OutputPath -Parent) -ItemType Directory -Force | Out-Null
 }
 
-Write-Host "Simulating guest access scenarios..." -ForegroundColor Cyan
+# Set InformationPreference to continue to ensure messages are displayed
+$currentInformationPreference = $InformationPreference
+$InformationPreference = 'Continue'
+
+Write-Information "Simulating guest access scenarios..." -InformationAction Continue -ForegroundColor Cyan
 
 # Scenario 1: Guest accessing Office 365 from trusted network, no MFA
-Write-Host "`nScenario 1: Guest accessing Office 365 from trusted network, no MFA"
+Write-Information "`nScenario 1: Guest accessing Office 365 from trusted network, no MFA" -InformationAction Continue
 $scenario1 = Invoke-CAWhatIf `
     -UserId "guest@partner.com" `
     -UserGroups "Guests" `
@@ -38,15 +43,16 @@ $scenario1 = Invoke-CAWhatIf `
     -MfaAuthenticated $false `
     -OutputLevel "Detailed"
 
-Write-Host "Access allowed: $($scenario1.AccessAllowed)"
+Write-Information "Access allowed: $($scenario1.AccessAllowed)" -InformationAction Continue
 if (-not $scenario1.AccessAllowed) {
-    Write-Host "Blocked by policies: $($scenario1.BlockingPolicies.DisplayName -join ', ')"
-} elseif ($scenario1.RequiredControls.Count -gt 0) {
-    Write-Host "Required controls: $($scenario1.RequiredControls -join ', ')"
+    Write-Information "Blocked by policies: $($scenario1.BlockingPolicies.DisplayName -join ', ')" -InformationAction Continue
+}
+elseif ($scenario1.RequiredControls.Count -gt 0) {
+    Write-Information "Required controls: $($scenario1.RequiredControls -join ', ')" -InformationAction Continue
 }
 
 # Scenario 2: Guest accessing Office 365 from untrusted network, no MFA
-Write-Host "`nScenario 2: Guest accessing Office 365 from untrusted network, no MFA"
+Write-Information "`nScenario 2: Guest accessing Office 365 from untrusted network, no MFA" -InformationAction Continue
 $scenario2 = Invoke-CAWhatIf `
     -UserId "guest@partner.com" `
     -UserGroups "Guests" `
@@ -57,15 +63,16 @@ $scenario2 = Invoke-CAWhatIf `
     -MfaAuthenticated $false `
     -OutputLevel "Detailed"
 
-Write-Host "Access allowed: $($scenario2.AccessAllowed)"
+Write-Information "Access allowed: $($scenario2.AccessAllowed)" -InformationAction Continue
 if (-not $scenario2.AccessAllowed) {
-    Write-Host "Blocked by policies: $($scenario2.BlockingPolicies.DisplayName -join ', ')"
-} elseif ($scenario2.RequiredControls.Count -gt 0) {
-    Write-Host "Required controls: $($scenario2.RequiredControls -join ', ')"
+    Write-Information "Blocked by policies: $($scenario2.BlockingPolicies.DisplayName -join ', ')" -InformationAction Continue
+}
+elseif ($scenario2.RequiredControls.Count -gt 0) {
+    Write-Information "Required controls: $($scenario2.RequiredControls -join ', ')" -InformationAction Continue
 }
 
 # Scenario 3: Guest accessing Office 365 from untrusted network, with MFA
-Write-Host "`nScenario 3: Guest accessing Office 365 from untrusted network, with MFA"
+Write-Information "`nScenario 3: Guest accessing Office 365 from untrusted network, with MFA" -InformationAction Continue
 $scenario3 = Invoke-CAWhatIf `
     -UserId "guest@partner.com" `
     -UserGroups "Guests" `
@@ -76,30 +83,31 @@ $scenario3 = Invoke-CAWhatIf `
     -MfaAuthenticated $true `
     -OutputLevel "Detailed"
 
-Write-Host "Access allowed: $($scenario3.AccessAllowed)"
+Write-Information "Access allowed: $($scenario3.AccessAllowed)" -InformationAction Continue
 if (-not $scenario3.AccessAllowed) {
-    Write-Host "Blocked by policies: $($scenario3.BlockingPolicies.DisplayName -join ', ')"
-} elseif ($scenario2.RequiredControls.Count -gt 0) {
-    Write-Host "Required controls: $($scenario3.RequiredControls -join ', ')"
+    Write-Information "Blocked by policies: $($scenario3.BlockingPolicies.DisplayName -join ', ')" -InformationAction Continue
+}
+elseif ($scenario2.RequiredControls.Count -gt 0) {
+    Write-Information "Required controls: $($scenario3.RequiredControls -join ', ')" -InformationAction Continue
 }
 if ($scenario3.SessionControls.Count -gt 0) {
-    Write-Host "Session controls: $($scenario3.SessionControls -join ', ')"
+    Write-Information "Session controls: $($scenario3.SessionControls -join ', ')" -InformationAction Continue
 }
 
 # Generate a comprehensive HTML report for all scenarios
-Write-Host "`nGenerating comprehensive HTML report of all scenarios..."
+Write-Information "`nGenerating comprehensive HTML report of all scenarios..." -InformationAction Continue
 $allScenarios = @{
     Scenarios = @(
         @{
-            Name = "Guest from trusted network, no MFA"
+            Name    = "Guest from trusted network, no MFA"
             Results = $scenario1
         },
         @{
-            Name = "Guest from untrusted network, no MFA"
+            Name    = "Guest from untrusted network, no MFA"
             Results = $scenario2
         },
         @{
-            Name = "Guest from untrusted network, with MFA"
+            Name    = "Guest from untrusted network, with MFA"
             Results = $scenario3
         }
     )
@@ -147,7 +155,7 @@ foreach ($scenario in $allScenarios.Scenarios) {
         }
         $html += "                </ul>`n            </div>`n"
     }
-    
+
     if ($scenario.Results.RequiredControls -and $scenario.Results.RequiredControls.Count -gt 0) {
         $html += @"
             <div class="details">
@@ -159,7 +167,7 @@ foreach ($scenario in $allScenarios.Scenarios) {
         }
         $html += "                </ul>`n            </div>`n"
     }
-    
+
     if ($scenario.Results.SessionControls -and $scenario.Results.SessionControls.Count -gt 0) {
         $html += @"
             <div class="details">
@@ -171,7 +179,7 @@ foreach ($scenario in $allScenarios.Scenarios) {
         }
         $html += "                </ul>`n            </div>`n"
     }
-    
+
     $html += "        </div>`n"
 }
 
@@ -185,6 +193,9 @@ $html += @"
 $html | Out-File -FilePath $HtmlReportPath -Encoding utf8
 $allScenarios | ConvertTo-Json -Depth 10 | Out-File -FilePath $JsonReportPath -Encoding utf8
 
-Write-Host "`nReports generated:"
-Write-Host "HTML report: $HtmlReportPath"
-Write-Host "JSON report: $JsonReportPath" 
+Write-Information "`nReports generated:" -InformationAction Continue
+Write-Information "HTML report: $HtmlReportPath" -InformationAction Continue
+Write-Information "JSON report: $JsonReportPath" -InformationAction Continue
+
+# Restore the original InformationPreference
+$InformationPreference = $currentInformationPreference

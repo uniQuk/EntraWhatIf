@@ -2,59 +2,60 @@ function Resolve-CAGrantControl {
     <#
     .SYNOPSIS
         Evaluates the grant controls for a Conditional Access policy that applies to a sign-in scenario.
-    
+
     .DESCRIPTION
         This function evaluates the grant controls of a Conditional Access policy to determine
         if access is blocked, granted, or conditionally granted based on the policy's requirements
         and the provided user and device contexts.
-    
+
     .PARAMETER Policy
         The Conditional Access policy to evaluate.
-    
+
     .PARAMETER UserContext
         The user context for the sign-in scenario.
-    
+
     .PARAMETER DeviceContext
         The device context for the sign-in scenario.
-    
+
     .EXAMPLE
         Resolve-CAGrantControl -Policy $policy -UserContext $UserContext -DeviceContext $DeviceContext
     #>
     [CmdletBinding()]
+    [OutputType([System.Collections.Hashtable])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
-        
+
         [Parameter(Mandatory = $true)]
         [object]$UserContext,
-        
+
         [Parameter(Mandatory = $true)]
         [object]$DeviceContext
     )
-    
+
     # If no grant controls specified, access is granted
     if (-not $Policy.GrantControls -or -not $Policy.GrantControls.BuiltInControls) {
         return @{
-            AccessResult = "Granted"
+            AccessResult          = "Granted"
             GrantControlsRequired = @()
         }
     }
-    
+
     $controls = $Policy.GrantControls.BuiltInControls
     $operator = $Policy.GrantControls._Operator  # AND or OR
-    
+
     # If block is specified, access is blocked regardless of other controls
     if ($controls -contains "block") {
         return @{
-            AccessResult = "Blocked"
+            AccessResult          = "Blocked"
             GrantControlsRequired = @()
         }
     }
-    
+
     # Create a hashtable to track the status of each control
     $controlStatus = @{}
     $requiredControls = @()
-    
+
     # Check each control
     foreach ($control in $controls) {
         switch ($control) {
@@ -105,7 +106,7 @@ function Resolve-CAGrantControl {
             }
         }
     }
-    
+
     # Determine access result based on operator
     if ($operator -eq "AND") {
         # All controls must be satisfied
@@ -116,16 +117,16 @@ function Resolve-CAGrantControl {
                 break
             }
         }
-        
+
         if ($allSatisfied) {
             return @{
-                AccessResult = "Granted"
+                AccessResult          = "Granted"
                 GrantControlsRequired = @()
             }
         }
         else {
             return @{
-                AccessResult = "ConditionallyGranted"
+                AccessResult          = "ConditionallyGranted"
                 GrantControlsRequired = $requiredControls
             }
         }
@@ -139,16 +140,16 @@ function Resolve-CAGrantControl {
                 break
             }
         }
-        
+
         if ($anySatisfied) {
             return @{
-                AccessResult = "Granted"
+                AccessResult          = "Granted"
                 GrantControlsRequired = @()
             }
         }
         else {
             return @{
-                AccessResult = "ConditionallyGranted"
+                AccessResult          = "ConditionallyGranted"
                 GrantControlsRequired = $requiredControls
             }
         }
@@ -156,8 +157,8 @@ function Resolve-CAGrantControl {
     else {
         # Default to AND behavior
         return @{
-            AccessResult = "ConditionallyGranted"
+            AccessResult          = "ConditionallyGranted"
             GrantControlsRequired = $requiredControls
         }
     }
-} 
+}
