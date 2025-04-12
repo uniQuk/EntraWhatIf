@@ -17,6 +17,7 @@ function Resolve-UserIdentity {
         Resolve-UserIdentity -UserIdOrUpn "846eca8a-95ce-4d54-a45c-37b5fea0e3a8"
     #>
     [CmdletBinding()]
+    [OutputType([PSCustomObject])]
     param (
         [Parameter(Mandatory = $true)]
         [string]$UserIdOrUpn
@@ -33,7 +34,7 @@ function Resolve-UserIdentity {
             $user = Get-MgUser -UserId $UserIdOrUpn -ErrorAction Stop
         }
         else {
-            # If we have a UPN or other identifier, filter by userPrincipalName
+            # If we have a UPN or other identifier, filter by userPrincipalName (case-insensitive)
             $filter = "userPrincipalName eq '$UserIdOrUpn'"
             $user = Get-MgUser -Filter $filter -ErrorAction Stop
 
@@ -42,12 +43,24 @@ function Resolve-UserIdentity {
                 $filter = "displayName eq '$UserIdOrUpn'"
                 $user = Get-MgUser -Filter $filter -ErrorAction Stop
             }
+
+            # If still not found, try a more flexible search approach
+            if (-not $user) {
+                $filter = "startswith(userPrincipalName,'$UserIdOrUpn') or startswith(mail,'$UserIdOrUpn')"
+                $users = Get-MgUser -Filter $filter -Top 1 -ErrorAction Stop
+                if ($users -and $users.Count -gt 0) {
+                    $user = $users[0]
+                }
+            }
         }
 
         if ($user) {
+            # Store both lowercase versions for case-insensitive comparisons later
             return [PSCustomObject]@{
                 Id                = $user.Id
+                IdLower           = $user.Id.ToLower()
                 UserPrincipalName = $user.UserPrincipalName
+                UpnLower          = $user.UserPrincipalName.ToLower()
                 DisplayName       = $user.DisplayName
                 JobTitle          = $user.JobTitle
                 Department        = $user.Department
@@ -58,7 +71,9 @@ function Resolve-UserIdentity {
             Write-Verbose "User not found: $UserIdOrUpn"
             return [PSCustomObject]@{
                 Id                = $UserIdOrUpn
+                IdLower           = $UserIdOrUpn.ToLower()
                 UserPrincipalName = $UserIdOrUpn
+                UpnLower          = $UserIdOrUpn.ToLower()
                 DisplayName       = "Unknown User"
                 Success           = $false
             }
@@ -68,7 +83,9 @@ function Resolve-UserIdentity {
         Write-Verbose "Error resolving user identity: $($_.Exception.Message)"
         return [PSCustomObject]@{
             Id                = $UserIdOrUpn
+            IdLower           = $UserIdOrUpn.ToLower()
             UserPrincipalName = $UserIdOrUpn
+            UpnLower          = $UserIdOrUpn.ToLower()
             DisplayName       = "Unknown User"
             Success           = $false
             Error             = $_.Exception.Message

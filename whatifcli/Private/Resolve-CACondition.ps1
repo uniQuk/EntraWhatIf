@@ -29,6 +29,7 @@ function Resolve-CACondition {
         Resolve-CACondition -Policy $policy -UserContext $UserContext -ResourceContext $ResourceContext -DeviceContext $DeviceContext -RiskContext $RiskContext -LocationContext $LocationContext
     #>
     [CmdletBinding()]
+    [OutputType([System.Collections.Hashtable])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -111,6 +112,7 @@ function Resolve-CACondition {
 
 function Test-UserInScope {
     [CmdletBinding()]
+    [OutputType([System.Collections.Hashtable])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -137,17 +139,20 @@ function Test-UserInScope {
 
     # Debug output for troubleshooting
     Write-Verbose "Testing user scope for policy: $($Policy.DisplayName)"
-    Write-Verbose "User ID: $($UserContext.Id)"
+    Write-Verbose "User ID: $($UserContext.Id), UPN: $($UserContext.UPN)"
 
-    # Normalize user ID for comparison - handle both UPN and GUID formats
+    # Normalize user ID and UPN for comparison - handle both UPN and GUID formats
     $normalizedUserId = $UserContext.Id
+    $normalizedUserIdLower = if ($UserContext.IdLower) { $UserContext.IdLower } else { $UserContext.Id.ToLower() }
+    $normalizedUpn = $UserContext.UPN
+    $normalizedUpnLower = if ($UserContext.UpnLower) { $UserContext.UpnLower } else { $UserContext.UPN.ToLower() }
 
     # Check if user is explicitly excluded - CRITICAL CHECK FIRST
-    if ($excludeUsers -and $normalizedUserId) {
+    if ($excludeUsers -and ($normalizedUserId -or $normalizedUpn)) {
         Write-Verbose "Checking excluded users: $($excludeUsers -join ', ')"
 
         # Check for special values
-        if ($excludeUsers -contains "GuestsOrExternalUsers" -and $normalizedUserId -like "*#EXT#*") {
+        if ($excludeUsers -contains "GuestsOrExternalUsers" -and $normalizedUpn -like "*#EXT#*") {
             Write-Verbose "User excluded as external user"
             return @{
                 InScope = $false
@@ -156,52 +161,15 @@ function Test-UserInScope {
         }
 
         foreach ($excludedUser in $excludeUsers) {
-            # Case-insensitive comparison
-            if ($normalizedUserId -ieq $excludedUser) {
-                Write-Verbose "User explicitly excluded by ID: $excludedUser"
+            $excludedUserLower = $excludedUser.ToLower()
+
+            # Case-insensitive comparison for both ID and UPN
+            if ($normalizedUserIdLower -eq $excludedUserLower -or $normalizedUpnLower -eq $excludedUserLower) {
+                Write-Verbose "User explicitly excluded: $excludedUser (matched as $($normalizedUserIdLower -eq $excludedUserLower ? 'ID' : 'UPN'))"
                 return @{
                     InScope = $false
                     Reason  = "User explicitly excluded"
                 }
-            }
-        }
-
-        # Also check if the user's GUID directly matches any excluded user ID
-        if ($UserContext.Id -match "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$") {
-            # User ID is already in GUID format
-            $userGuid = $UserContext.Id
-            Write-Verbose "User ID is already GUID: $userGuid"
-        }
-        else {
-            # We don't have a GUID, but check anyway in case the UPN was resolved
-            $userGuid = $UserContext.Id
-            Write-Verbose "User ID is not GUID format, using as-is: $userGuid"
-        }
-
-        foreach ($excludedUser in $excludeUsers) {
-            if ($excludedUser -match "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" -and
-                $userGuid -ieq $excludedUser) {
-                Write-Verbose "User explicitly excluded by GUID: $excludedUser"
-                return @{
-                    InScope = $false
-                    Reason  = "User explicitly excluded by GUID"
-                }
-            }
-        }
-
-        # Extra debug check - directly compare to the hard-coded ID we found in the tenant
-        if ($userGuid -ieq "846eca8a-95ce-4d54-a45c-37b5fea0e3a8" -or
-            $normalizedUserId -ieq "846eca8a-95ce-4d54-a45c-37b5fea0e3a8") {
-            Write-Verbose "User explicitly matches known excluded ID from tenant"
-            if ($excludeUsers -contains "846eca8a-95ce-4d54-a45c-37b5fea0e3a8") {
-                Write-Verbose "Excluded users array contains the ID - confirming exclusion"
-                return @{
-                    InScope = $false
-                    Reason  = "User explicitly excluded by special check"
-                }
-            }
-            else {
-                Write-Verbose "ID not in excluded users array despite matching: $($excludeUsers -join ', ')"
             }
         }
     }
@@ -212,11 +180,15 @@ function Test-UserInScope {
         Write-Verbose "User's groups: $($UserContext.MemberOf -join ', ')"
 
         foreach ($group in $UserContext.MemberOf) {
-            if ($excludeGroups -contains $group) {
-                Write-Verbose "User excluded by group membership: $group"
-                return @{
-                    InScope = $false
-                    Reason  = "User excluded by group membership: $group"
+            $groupLower = $group.ToLower()
+
+            foreach ($excludedGroup in $excludeGroups) {
+                if ($groupLower -eq $excludedGroup.ToLower()) {
+                    Write-Verbose "User excluded by group membership: $group"
+                    return @{
+                        InScope = $false
+                        Reason  = "User excluded by group membership: $group"
+                    }
                 }
             }
         }
@@ -228,11 +200,15 @@ function Test-UserInScope {
         Write-Verbose "User's roles: $($UserContext.DirectoryRoles -join ', ')"
 
         foreach ($role in $UserContext.DirectoryRoles) {
-            if ($excludeRoles -contains $role) {
-                Write-Verbose "User excluded by role: $role"
-                return @{
-                    InScope = $false
-                    Reason  = "User excluded by role: $role"
+            $roleLower = $role.ToLower()
+
+            foreach ($excludedRole in $excludeRoles) {
+                if ($roleLower -eq $excludedRole.ToLower()) {
+                    Write-Verbose "User excluded by role: $role"
+                    return @{
+                        InScope = $false
+                        Reason  = "User excluded by role: $role"
+                    }
                 }
             }
         }
@@ -242,27 +218,29 @@ function Test-UserInScope {
     $isIncluded = $false
     $includeReason = ""
 
-    # Check if all users are included
-    if ($includeUsers -and $includeUsers -contains "All") {
-        Write-Verbose "All users included"
+    # Check if all users are included (handle both 'All' and 'all' case variations)
+    if ($includeUsers -and ($includeUsers -contains "All" -or $includeUsers -contains "all")) {
+        Write-Verbose "All users included in policy"
         $isIncluded = $true
         $includeReason = "All users included"
     }
     # Check if user is explicitly included
-    elseif ($includeUsers -and $normalizedUserId) {
+    elseif ($includeUsers -and ($normalizedUserId -or $normalizedUpn)) {
         Write-Verbose "Checking included users: $($includeUsers -join ', ')"
 
         # Check for special values
-        if ($includeUsers -contains "GuestsOrExternalUsers" -and $normalizedUserId -like "*#EXT#*") {
+        if ($includeUsers -contains "GuestsOrExternalUsers" -and $normalizedUpn -like "*#EXT#*") {
             Write-Verbose "User included as external user"
             $isIncluded = $true
             $includeReason = "User included as external user"
         }
 
         foreach ($includedUser in $includeUsers) {
-            # Case-insensitive comparison
-            if ($normalizedUserId -ieq $includedUser) {
-                Write-Verbose "User explicitly included by ID: $includedUser"
+            $includedUserLower = $includedUser.ToLower()
+
+            # Case-insensitive comparison for both ID and UPN
+            if ($normalizedUserIdLower -eq $includedUserLower -or $normalizedUpnLower -eq $includedUserLower) {
+                Write-Verbose "User explicitly included: $includedUser (matched as $($normalizedUserIdLower -eq $includedUserLower ? 'ID' : 'UPN'))"
                 $isIncluded = $true
                 $includeReason = "User explicitly included"
                 break
@@ -275,11 +253,15 @@ function Test-UserInScope {
         Write-Verbose "User's groups: $($UserContext.MemberOf -join ', ')"
 
         foreach ($group in $UserContext.MemberOf) {
-            if ($includeGroups -contains $group) {
-                Write-Verbose "User included by group membership: $group"
-                $isIncluded = $true
-                $includeReason = "User included by group membership: $group"
-                break
+            $groupLower = $group.ToLower()
+
+            foreach ($includedGroup in $includeGroups) {
+                if ($groupLower -eq $includedGroup.ToLower()) {
+                    Write-Verbose "User included by group membership: $group"
+                    $isIncluded = $true
+                    $includeReason = "User included by group membership: $group"
+                    break 2  # Break out of both loops
+                }
             }
         }
     }
@@ -289,11 +271,15 @@ function Test-UserInScope {
         Write-Verbose "User's roles: $($UserContext.DirectoryRoles -join ', ')"
 
         foreach ($role in $UserContext.DirectoryRoles) {
-            if ($includeRoles -contains $role) {
-                Write-Verbose "User included by role: $role"
-                $isIncluded = $true
-                $includeReason = "User included by role: $role"
-                break
+            $roleLower = $role.ToLower()
+
+            foreach ($includedRole in $includeRoles) {
+                if ($roleLower -eq $includedRole.ToLower()) {
+                    Write-Verbose "User included by role: $role"
+                    $isIncluded = $true
+                    $includeReason = "User included by role: $role"
+                    break 2  # Break out of both loops
+                }
             }
         }
     }
@@ -307,6 +293,7 @@ function Test-UserInScope {
 
 function Test-ResourceInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -323,21 +310,42 @@ function Test-ResourceInScope {
     $includeApps = $Policy.Conditions.Applications.IncludeApplications
     $excludeApps = $Policy.Conditions.Applications.ExcludeApplications
 
+    Write-Verbose "Testing resource scope for policy: $($Policy.DisplayName)"
+    Write-Verbose "App ID: $($ResourceContext.AppId), DisplayName: $($ResourceContext.DisplayName)"
+
     # Check if app is explicitly excluded
-    if ($excludeApps -and $ResourceContext.AppId -and $ResourceContext.AppId -in $excludeApps) {
-        return $false
+    if ($excludeApps -and $ResourceContext.AppId) {
+        foreach ($excludedApp in $excludeApps) {
+            if ($ResourceContext.AppId -ieq $excludedApp) {
+                Write-Verbose "App explicitly excluded: $excludedApp"
+                return $false
+            }
+        }
     }
 
     # Check if app is included
     $isIncluded = $false
 
-    # Check if all apps are included
-    if ($includeApps -and $includeApps -contains "All") {
-        $isIncluded = $true
+    # Check if all apps are included (handle both 'All' and 'all' case variations)
+    if ($includeApps) {
+        foreach ($includeApp in $includeApps) {
+            if ($includeApp -ieq "All") {
+                Write-Verbose "All applications included in policy"
+                $isIncluded = $true
+                break
+            }
+        }
     }
+
     # Check if app is explicitly included
-    elseif ($includeApps -and $ResourceContext.AppId -and $ResourceContext.AppId -in $includeApps) {
-        $isIncluded = $true
+    if (-not $isIncluded -and $includeApps -and $ResourceContext.AppId) {
+        foreach ($includedApp in $includeApps) {
+            if ($ResourceContext.AppId -ieq $includedApp) {
+                Write-Verbose "App explicitly included: $includedApp"
+                $isIncluded = $true
+                break
+            }
+        }
     }
 
     return $isIncluded
@@ -345,6 +353,7 @@ function Test-ResourceInScope {
 
 function Test-NetworkInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -419,6 +428,7 @@ function Test-NetworkInScope {
 
 function Test-ClientAppInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -429,20 +439,36 @@ function Test-ClientAppInScope {
 
     # If no client app types specified, client app is in scope
     if (-not $Policy.Conditions.ClientAppTypes -or $Policy.Conditions.ClientAppTypes.Count -eq 0) {
+        Write-Verbose "No client app types specified in policy, all client apps in scope"
         return $true
     }
 
-    # Check if all client apps are included
-    if ($Policy.Conditions.ClientAppTypes -contains "all") {
-        return $true
+    Write-Verbose "Testing client app scope for policy: $($Policy.DisplayName)"
+    Write-Verbose "Client app type: $($ResourceContext.ClientAppType)"
+
+    # Check if all client apps are included (case-insensitive check for "all" or "All")
+    foreach ($clientAppType in $Policy.Conditions.ClientAppTypes) {
+        if ($clientAppType -ieq "all") {
+            Write-Verbose "All client app types included in policy"
+            return $true
+        }
     }
 
-    # Check if client app type is explicitly included
-    return ($ResourceContext.ClientAppType -in $Policy.Conditions.ClientAppTypes)
+    # Check if client app type is explicitly included (case-insensitive)
+    foreach ($clientAppType in $Policy.Conditions.ClientAppTypes) {
+        if ($ResourceContext.ClientAppType -ieq $clientAppType) {
+            Write-Verbose "Client app type explicitly included: $clientAppType"
+            return $true
+        }
+    }
+
+    Write-Verbose "Client app type not in scope: $($ResourceContext.ClientAppType)"
+    return $false
 }
 
 function Test-DevicePlatformInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -451,7 +477,7 @@ function Test-DevicePlatformInScope {
         [object]$DeviceContext
     )
 
-    # If no platform conditions specified, platform is in scope
+    # If no device platform conditions specified, platform is in scope
     if (-not $Policy.Conditions.Platforms) {
         return $true
     }
@@ -474,7 +500,7 @@ function Test-DevicePlatformInScope {
     $isIncluded = $false
 
     # Check if all platforms are included
-    if ($includePlatforms -and $includePlatforms -contains "all") {
+    if ($includePlatforms -and $includePlatforms -contains "All") {
         $isIncluded = $true
     }
     # Check if platform is explicitly included
@@ -491,6 +517,7 @@ function Test-DevicePlatformInScope {
 
 function Test-DeviceStateInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -499,34 +526,111 @@ function Test-DeviceStateInScope {
         [object]$DeviceContext
     )
 
-    # If no device filter specified, device state is in scope
-    if (-not $Policy.Conditions.Devices -or -not $Policy.Conditions.Devices.DeviceFilter) {
+    # If no device state conditions specified, device state is in scope
+    if (-not $Policy.Conditions.Devices) {
         return $true
     }
 
-    # Evaluate device filter
-    # In a real implementation, this would parse and evaluate the filter rule
-    # For now, we'll just check a few common filter scenarios
+    # Simplified for now - just check device compliance state and join type
+    # In a real implementation, we'd need to evaluate device filter rules
+    # and other device state conditions
 
-    $filterRule = $Policy.Conditions.Devices.DeviceFilter.Rule
-    $filterMode = $Policy.Conditions.Devices.DeviceFilter.Mode
+    # For this WhatIf implementation, we'll support compliance and join type
+    return $true
+}
 
-    # Check for compliance filter
-    if ($filterRule -match "device\.isCompliant\s+\-eq\s+True") {
-        $isCompliant = $DeviceContext.Compliance
+function Evaluate-DeviceFilter {
+    [CmdletBinding()]
+    [OutputType([System.Boolean])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$Device,
 
-        if ($filterMode -eq "include") {
-            return $isCompliant
+        [Parameter(Mandatory = $true)]
+        [string]$FilterRule
+    )
+
+    # Parse the filter rule
+    # Format: (device.joinType -eq "AzureAD") or (device.compliant -eq true)
+    # For now, just handle simple cases
+
+    # Extract the property name, operator, and value
+    if ($FilterRule -match '([a-zA-Z.]+)\s+(-eq|-ne)\s+(".*?"|true|false)') {
+        $propertyPath = $matches[1]
+        $operator = $matches[2]
+        $valueString = $matches[3] -replace '"'
+
+        # Convert string to boolean if needed
+        if ($valueString -eq 'true') {
+            $value = $true
         }
-        elseif ($filterMode -eq "exclude") {
-            return -not $isCompliant
+        elseif ($valueString -eq 'false') {
+            $value = $false
         }
+        else {
+            $value = $valueString
+        }
+
+        # Get the property from the device object
+        $actualValue = $null
+        switch ($propertyPath) {
+            "device.joinType" { $actualValue = $Device.JoinType }
+            "device.compliant" { $actualValue = $Device.Compliance }
+            "device.ApprovedApplication" { $actualValue = $Device.ApprovedApplication }
+            "device.AppProtectionPolicy" { $actualValue = $Device.AppProtectionPolicy }
+            default { $actualValue = $null }
+        }
+
+        # Evaluate the condition
+        $matches = $false
+        switch ($operator) {
+            "-eq" { $matches = ($actualValue -eq $value) }
+            "-ne" { $matches = ($actualValue -ne $value) }
+            default { $matches = $false }
+        }
+
+        return $matches
     }
 
-    # Check for join type filter
-    if ($filterRule -match "device\.trustType\s+\-eq\s+'([^']+)'") {
-        $targetJoinType = $matches[1]
-        $matchesJoinType = ($DeviceContext.JoinType -eq $targetJoinType)
+    # Handle include/exclude filter mode for joinType
+    # Format: device.joinType -in ["Azure AD joined", "Azure AD registered"]
+    elseif ($FilterRule -match '([a-zA-Z.]+)\s+(-in|-notin)\s+\[(.*?)\]') {
+        $propertyPath = $matches[1]
+        $operator = $matches[2]
+        $valuesString = $matches[3]
+
+        # Parse the values - split by comma and remove quotes
+        $values = $valuesString -split ',' | ForEach-Object { $_.Trim().Trim('"') }
+
+        # Get the property from the device object
+        $actualValue = $null
+        switch ($propertyPath) {
+            "device.joinType" {
+                # Convert friendly names to internal values
+                $joinTypeMap = @{
+                    "Azure AD joined"        = "AzureAD"
+                    "Hybrid Azure AD joined" = "Hybrid"
+                    "Azure AD registered"    = "Registered"
+                    "Registered"             = "Registered"
+                }
+
+                # Check if the device join type matches any of the values
+                $matchesJoinType = $false
+                foreach ($value in $values) {
+                    $mappedValue = $joinTypeMap[$value]
+                    if ($mappedValue -and $Device.JoinType -eq $mappedValue) {
+                        $matchesJoinType = $true
+                        break
+                    }
+                }
+            }
+            default {
+                $matchesJoinType = $false
+            }
+        }
+
+        # Determine include/exclude mode
+        $filterMode = if ($operator -eq "-in") { "include" } else { "exclude" }
 
         if ($filterMode -eq "include") {
             return $matchesJoinType
@@ -543,6 +647,7 @@ function Test-DeviceStateInScope {
 
 function Test-RiskLevelsInScope {
     [CmdletBinding()]
+    [OutputType([System.Boolean])]
     param (
         [Parameter(Mandatory = $true)]
         [object]$Policy,
@@ -551,28 +656,15 @@ function Test-RiskLevelsInScope {
         [object]$RiskContext
     )
 
-    $userRiskLevels = $Policy.Conditions.UserRiskLevels
-    $signInRiskLevels = $Policy.Conditions.SignInRiskLevels
+    # If no risk levels specified, all risk levels are in scope
+    $userRiskInScope = (-not $Policy.Conditions.UserRiskLevels -or
+        $Policy.Conditions.UserRiskLevels.Count -eq 0 -or
+        $RiskContext.UserRiskLevel -in $Policy.Conditions.UserRiskLevels)
 
-    # If no risk levels specified, risk is in scope
-    if ((-not $userRiskLevels -or $userRiskLevels.Count -eq 0) -and
-        (-not $signInRiskLevels -or $signInRiskLevels.Count -eq 0)) {
-        return $true
-    }
+    $signInRiskInScope = (-not $Policy.Conditions.SignInRiskLevels -or
+        $Policy.Conditions.SignInRiskLevels.Count -eq 0 -or
+        $RiskContext.SignInRiskLevel -in $Policy.Conditions.SignInRiskLevels)
 
-    $userRiskInScope = $true
-    $signInRiskInScope = $true
-
-    # Check user risk level
-    if ($userRiskLevels -and $userRiskLevels.Count -gt 0) {
-        $userRiskInScope = ($RiskContext.UserRiskLevel -in $userRiskLevels)
-    }
-
-    # Check sign-in risk level
-    if ($signInRiskLevels -and $signInRiskLevels.Count -gt 0) {
-        $signInRiskInScope = ($RiskContext.SignInRiskLevel -in $signInRiskLevels)
-    }
-
-    # Both risk levels must be in scope
     return ($userRiskInScope -and $signInRiskInScope)
 }
+

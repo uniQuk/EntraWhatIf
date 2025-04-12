@@ -19,7 +19,7 @@ A PowerShell module to simulate Microsoft Entra Conditional Access policy evalua
 
 ## Prerequisites
 
-- PowerShell 5.1 or higher
+- PowerShell 7.x or higher
 - Microsoft.Graph.Authentication module
 - Microsoft.Graph.Identity.SignIns module
 - Entra ID permissions:
@@ -113,4 +113,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
