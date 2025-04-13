@@ -1,1 +1,0 @@
-Import-Module ./whatifcli/whatifcli.psd1 -Force; Invoke-CAWhatIf -UserId "awsm@n7.uk" -Diagnostic

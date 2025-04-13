@@ -10,6 +10,12 @@ function Invoke-CAWhatIf {
     .PARAMETER UserId
         The user's object ID or user principal name (UPN).
 
+    .PARAMETER ServicePrincipalId
+        The service principal's object ID or application ID. Use this instead of UserId when testing for a service principal.
+
+    .PARAMETER ServicePrincipalDisplayName
+        The display name of the service principal. Used for display purposes only.
+
     .PARAMETER UserGroups
         The groups that the user is a member of.
 
@@ -22,6 +28,13 @@ function Invoke-CAWhatIf {
     .PARAMETER AppId
         The application ID to simulate access to.
 
+    .PARAMETER UserAction
+        The user action to simulate, such as registering security information or
+        performing privilege elevation. Cannot be used with AppId.
+
+    .PARAMETER ShowSupportedUserActions
+        When specified, displays all supported user actions with descriptions.
+
     .PARAMETER AppDisplayName
         The display name of the application.
 
@@ -30,6 +43,12 @@ function Invoke-CAWhatIf {
 
     .PARAMETER Location
         The named location from which the sign-in is occurring.
+
+    .PARAMETER CountryCode
+        The country code associated with the location.
+
+    .PARAMETER IsTrustedLocation
+        Whether the location is trusted.
 
     .PARAMETER ClientAppType
         The client application type (Browser, MobileAppsAndDesktopClients, ExchangeActiveSync, Other).
@@ -58,6 +77,12 @@ function Invoke-CAWhatIf {
     .PARAMETER BrowserPersistence
         Whether browser persistence is enabled.
 
+    .PARAMETER AuthenticationContext
+        The authentication context for the sign-in scenario.
+
+    .PARAMETER ShowSupportedAuthenticationContexts
+        When specified, displays all supported authentication contexts with descriptions.
+
     .PARAMETER PolicyIds
         Specific policy IDs to evaluate. If not specified, all policies are evaluated.
 
@@ -65,10 +90,16 @@ function Invoke-CAWhatIf {
         Whether to include policies in report-only mode in the evaluation.
 
     .PARAMETER OutputLevel
-        The level of detail to include in the output (Basic, Detailed, Table).
+        The level of detail to include in the output (Basic, Detailed, Table, MicrosoftFormat).
+
+    .PARAMETER AsJson
+        Whether to output the results in JSON format for the MicrosoftFormat option.
 
     .PARAMETER Diagnostic
         Whether to enable verbose output for policy evaluation.
+
+    .PARAMETER DiagnosticLogPath
+        The path to save diagnostic logs for the detailed output.
 
     .EXAMPLE
         Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -DevicePlatform "Windows"
@@ -76,28 +107,51 @@ function Invoke-CAWhatIf {
     .EXAMPLE
         Invoke-CAWhatIf -UserId "john.doe@contoso.com" -UserGroups "Sales", "VPN Users" -AppId "00000002-0000-0ff1-ce00-000000000000" -ClientAppType "Browser" -DevicePlatform "Windows" -DeviceCompliant $true -OutputLevel "Detailed"
     #>
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = "User")]
     param (
         # User parameters
-        [Parameter()]
+        [Parameter(Mandatory = $false, ParameterSetName = "User")]
+        [Parameter(Mandatory = $false, ParameterSetName = "Application")]
+        [Parameter(Mandatory = $false, ParameterSetName = "UserAction")]
         [string]$UserId,
 
-        [Parameter()]
+        [Parameter(Mandatory = $true, ParameterSetName = "ServicePrincipal")]
+        [string]$ServicePrincipalId,
+
+        [Parameter(Mandatory = $false, ParameterSetName = "ServicePrincipal")]
+        [string]$ServicePrincipalDisplayName,
+
+        [Parameter(ParameterSetName = "User")]
+        [Parameter(ParameterSetName = "Application")]
+        [Parameter(ParameterSetName = "UserAction")]
+        [Parameter(ParameterSetName = "ServicePrincipal")]
         [string[]]$UserGroups,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = "User")]
+        [Parameter(ParameterSetName = "Application")]
+        [Parameter(ParameterSetName = "UserAction")]
+        [Parameter(ParameterSetName = "ServicePrincipal")]
         [string[]]$UserRoles,
 
-        [Parameter()]
+        [Parameter(ParameterSetName = "User")]
+        [Parameter(ParameterSetName = "Application")]
+        [Parameter(ParameterSetName = "UserAction")]
+        [Parameter(ParameterSetName = "ServicePrincipal")]
         [ValidateSet('None', 'Low', 'Medium', 'High')]
         [string]$UserRiskLevel = 'None',
 
         # Resource parameters
-        [Parameter()]
+        [Parameter(Mandatory = $true, ParameterSetName = "Application")]
         [string]$AppId,
 
-        [Parameter()]
+        [Parameter(Mandatory = $false, ParameterSetName = "Application")]
         [string]$AppDisplayName,
+
+        [Parameter(Mandatory = $true, ParameterSetName = "UserAction")]
+        [string]$UserAction,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ShowSupportedUserActions,
 
         # Sign-in context
         [Parameter()]
@@ -105,6 +159,12 @@ function Invoke-CAWhatIf {
 
         [Parameter()]
         [string]$Location,
+
+        [Parameter()]
+        [string]$CountryCode,
+
+        [Parameter()]
+        [bool]$IsTrustedLocation,
 
         [Parameter()]
         [ValidateSet('Browser', 'MobileAppsAndDesktopClients', 'ExchangeActiveSync', 'Other')]
@@ -137,6 +197,13 @@ function Invoke-CAWhatIf {
         [Parameter()]
         [bool]$BrowserPersistence = $false,
 
+        # Authentication context parameters
+        [Parameter()]
+        [string[]]$AuthenticationContext,
+
+        [Parameter()]
+        [switch]$ShowSupportedAuthenticationContexts,
+
         # Filtering parameters
         [Parameter()]
         [string[]]$PolicyIds,
@@ -146,15 +213,89 @@ function Invoke-CAWhatIf {
 
         # Output parameters
         [Parameter()]
-        [ValidateSet('Basic', 'Detailed', 'Table')]
+        [ValidateSet('Basic', 'Detailed', 'Table', 'MicrosoftFormat')]
         [string]$OutputLevel = 'Table',
 
-        # Diagnostic mode
         [Parameter()]
-        [switch]$Diagnostic
+        [switch]$AsJson,
+
+        # Diagnostic parameters
+        [Parameter()]
+        [switch]$Diagnostic,
+
+        [Parameter()]
+        [string]$DiagnosticLogPath
     )
 
     begin {
+        # Initialize diagnostic log if path provided
+        if ($DiagnosticLogPath) {
+            if (-not (Test-Path -Path (Split-Path -Path $DiagnosticLogPath -Parent))) {
+                $null = New-Item -Path (Split-Path -Path $DiagnosticLogPath -Parent) -ItemType Directory -Force
+            }
+
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            $logHeader = "[$timestamp] WHATIF DIAGNOSTIC LOG - Started by: $env:USERNAME on $env:COMPUTERNAME"
+            $logHeader | Out-File -FilePath $DiagnosticLogPath -Force
+
+            Write-Verbose "Diagnostic logging enabled to path: $DiagnosticLogPath"
+        }
+
+        # Handle showing supported user actions
+        if ($ShowSupportedUserActions) {
+            $supportedActions = @(
+                [PSCustomObject]@{
+                    Action      = "registrationSecurityInfo"
+                    Description = "User registering or changing security information"
+                },
+                [PSCustomObject]@{
+                    Action      = "registrationOnPremMfa"
+                    Description = "User registering for on-premises MFA"
+                },
+                [PSCustomObject]@{
+                    Action      = "privilegedElevation"
+                    Description = "User performing privilege elevation"
+                },
+                [PSCustomObject]@{
+                    Action      = "registrationDeviceJoining"
+                    Description = "User joining or registering a device"
+                },
+                [PSCustomObject]@{
+                    Action      = "registrationProfileManagement"
+                    Description = "User registering or updating their profile"
+                }
+            )
+
+            return $supportedActions | Format-Table -AutoSize
+        }
+
+        # Handle showing supported authentication contexts
+        if ($ShowSupportedAuthenticationContexts) {
+            try {
+                $authContexts = Get-AuthenticationContextClassReferences
+
+                if ($authContexts.Count -eq 0) {
+                    Write-Warning "No authentication contexts found in the tenant."
+                    return
+                }
+
+                $contextList = $authContexts.GetEnumerator() | ForEach-Object {
+                    [PSCustomObject]@{
+                        Id          = $_.Key
+                        DisplayName = $_.Value.DisplayName
+                        Description = $_.Value.Description
+                        IsAvailable = $_.Value.IsAvailable
+                    }
+                }
+
+                return $contextList | Format-Table -AutoSize
+            }
+            catch {
+                Write-Warning "Failed to retrieve authentication contexts: $_"
+                return
+            }
+        }
+
         # Ensure we're connected to Microsoft Graph
         try {
             $graphConnection = Get-MgContext
@@ -167,67 +308,140 @@ function Invoke-CAWhatIf {
             return
         }
 
-        # Resolve the user identity (convert UPN to GUID or vice versa)
-        try {
-            $resolvedUser = Resolve-UserIdentity -UserIdOrUpn $UserId
-            if ($resolvedUser.Success) {
-                # Use the resolved GUID for all internal operations
-                $UserGuid = $resolvedUser.Id
-                $UserPrincipalName = $resolvedUser.UserPrincipalName
-                $UserDisplayName = $resolvedUser.DisplayName
+        # Determine if we're dealing with a user or service principal
+        $isServicePrincipal = $PSCmdlet.ParameterSetName -eq "ServicePrincipal"
 
-                Write-Verbose ("Resolved user '{0}' to: {1} ({2})" -f $UserId, $UserDisplayName, $UserGuid)
+        if ($isServicePrincipal) {
+            # Resolve the service principal identity
+            try {
+                $resolvedServicePrincipal = Resolve-ServicePrincipalIdentity -ServicePrincipalIdOrAppId $ServicePrincipalId
+                if ($resolvedServicePrincipal.Success) {
+                    # Use the resolved details
+                    $spId = $resolvedServicePrincipal.Id
+                    $spAppId = $resolvedServicePrincipal.AppId
+                    $spDisplayName = $resolvedServicePrincipal.DisplayName
+
+                    Write-Verbose ("Resolved service principal '{0}' to: {1} ({2})" -f $ServicePrincipalId, $spDisplayName, $spId)
+                }
+                else {
+                    # Continue with what was provided
+                    $spId = $ServicePrincipalId
+                    $spAppId = $ServicePrincipalId
+                    $spDisplayName = $ServicePrincipalDisplayName ?? "Unknown Service Principal"
+
+                    Write-Warning ("Could not resolve service principal identity for '{0}'. Using as-is." -f $ServicePrincipalId)
+                }
             }
-            else {
-                # Continue with what was provided
+            catch {
+                # Fall back to the provided ID
+                $spId = $ServicePrincipalId
+                $spAppId = $ServicePrincipalId
+                $spDisplayName = $ServicePrincipalDisplayName ?? "Unknown Service Principal"
+
+                Write-Warning ("Error resolving service principal identity: {0}" -f $_.Exception.Message)
+            }
+
+            # Create service principal context object
+            $UserContext = @{
+                Id                 = $spId
+                AppId              = $spAppId
+                DisplayName        = $spDisplayName
+                IsServicePrincipal = $true
+            }
+        }
+        else {
+            # Resolve the user identity (convert UPN to GUID or vice versa)
+            try {
+                $resolvedUser = Resolve-UserIdentity -UserIdOrUpn $UserId
+                if ($resolvedUser.Success) {
+                    # Use the resolved GUID for all internal operations
+                    $UserGuid = $resolvedUser.Id
+                    $UserPrincipalName = $resolvedUser.UserPrincipalName
+                    $UserDisplayName = $resolvedUser.DisplayName
+
+                    Write-Verbose ("Resolved user '{0}' to: {1} ({2})" -f $UserId, $UserDisplayName, $UserGuid)
+                }
+                else {
+                    # Continue with what was provided
+                    $UserGuid = $UserId
+                    $UserPrincipalName = $UserId
+                    $UserDisplayName = "Unknown User"
+
+                    Write-Warning ("Could not resolve user identity for '{0}'. Using as-is." -f $UserId)
+                }
+            }
+            catch {
+                # Fall back to the provided ID
                 $UserGuid = $UserId
                 $UserPrincipalName = $UserId
                 $UserDisplayName = "Unknown User"
 
-                Write-Warning ("Could not resolve user identity for '{0}'. Using as-is." -f $UserId)
+                Write-Warning ("Error resolving user identity: {0}" -f $_.Exception.Message)
             }
-        }
-        catch {
-            # Fall back to the provided ID
-            $UserGuid = $UserId
-            $UserPrincipalName = $UserId
-            $UserDisplayName = "Unknown User"
 
-            Write-Warning ("Error resolving user identity: {0}" -f $_.Exception.Message)
-        }
+            # If no groups were provided, but we have a valid user ID, get the user's groups
+            if ((-not $UserGroups -or $UserGroups.Count -eq 0) -and $resolvedUser.Success) {
+                try {
+                    $userGroupMemberships = Resolve-GroupMembership -UserId $UserGuid -IncludeNestedGroups
+                    if ($userGroupMemberships.Success -and $userGroupMemberships.Groups.Count -gt 0) {
+                        # Extract just the group IDs for the context
+                        $UserGroups = $userGroupMemberships.Groups | ForEach-Object { $_.Id }
 
-        # If no groups were provided, but we have a valid user ID, get the user's groups
-        if ((-not $UserGroups -or $UserGroups.Count -eq 0) -and $resolvedUser.Success) {
-            try {
-                $userGroupMemberships = Resolve-GroupMembership -UserId $UserGuid -IncludeNestedGroups
-                if ($userGroupMemberships.Success -and $userGroupMemberships.Groups.Count -gt 0) {
-                    # Extract just the group IDs for the context
-                    $UserGroups = $userGroupMemberships.Groups | ForEach-Object { $_.Id }
-
-                    Write-Verbose ("Retrieved {0} groups for user {1}" -f $UserGroups.Count, $UserDisplayName)
+                        Write-Verbose ("Retrieved {0} groups for user {1}" -f $UserGroups.Count, $UserDisplayName)
+                    }
+                }
+                catch {
+                    Write-Warning ("Could not retrieve group memberships: {0}" -f $_.Exception.Message)
                 }
             }
-            catch {
-                Write-Warning ("Could not retrieve group memberships: {0}" -f $_.Exception.Message)
+
+            # Create user context
+            $UserContext = @{
+                Id                 = $UserGuid
+                UPN                = $UserPrincipalName
+                DisplayName        = $UserDisplayName
+                MemberOf           = $UserGroups
+                DirectoryRoles     = $UserRoles
+                UserRiskLevel      = $UserRiskLevel
+                MfaAuthenticated   = $MfaAuthenticated
+                IsServicePrincipal = $false
             }
         }
 
-        # Create context objects
-        $UserContext = @{
-            Id               = $UserGuid
-            UPN              = $UserPrincipalName
-            DisplayName      = $UserDisplayName
-            MemberOf         = $UserGroups
-            DirectoryRoles   = $UserRoles
-            UserRiskLevel    = $UserRiskLevel
-            MfaAuthenticated = $MfaAuthenticated
+        # Build resource context
+        $resourceContext = @{}
+
+        if ($PSCmdlet.ParameterSetName -eq "Application") {
+            $resourceContext = @{
+                Type                  = "Application"
+                AppId                 = $AppId
+                DisplayName           = $AppDisplayName
+                ClientAppType         = $ClientAppType
+                IsApprovedApplication = $ApprovedApplication
+            }
+        }
+        elseif ($PSCmdlet.ParameterSetName -eq "UserAction") {
+            $resourceContext = @{
+                Type       = "UserAction"
+                UserAction = $UserAction
+            }
+        }
+        else {
+            # Default to application context for User and ServicePrincipal parameter sets
+            $resourceContext = @{
+                Type                  = "Application"
+                AppId                 = "00000000-0000-0000-0000-000000000000" # Default placeholder app ID
+                DisplayName           = "Default Application"
+                ClientAppType         = $ClientAppType
+                IsApprovedApplication = $ApprovedApplication
+            }
         }
 
-        $ResourceContext = @{
-            AppId               = $AppId
-            DisplayName         = $AppDisplayName
-            ClientAppType       = $ClientAppType
-            ApprovedApplication = $ApprovedApplication
+        # Add authentication context if provided
+        if ($AuthenticationContext) {
+            $resourceContext.AuthenticationContext = @{
+                ClassReference = $AuthenticationContext
+            }
         }
 
         $DeviceContext = @{
@@ -243,9 +457,63 @@ function Invoke-CAWhatIf {
             UserRiskLevel   = $UserRiskLevel
         }
 
-        $LocationContext = @{
-            IpAddress     = $IpAddress
-            NamedLocation = $Location
+        # Build location context
+        $locationContext = @{
+            IpAddress = $IpAddress
+        }
+
+        # Handle named location parameters
+        if ($Location) {
+            # First, check if Location is a Named Location ID
+            $namedLocations = Get-NamedLocations
+            if ($namedLocations.ContainsKey($Location)) {
+                $locationContext.NamedLocationId = $Location
+
+                # If it's a named location and no country is specified, use the location's country
+                if (-not $CountryCode -and $namedLocations[$Location].Type -eq "CountryOrRegion") {
+                    $CountryCode = $namedLocations[$Location].CountryOrRegion[0]
+                    Write-Verbose "Using country $CountryCode from named location $Location"
+                }
+
+                # If no trusted status is specified, use the location's trust status
+                if (-not $PSBoundParameters.ContainsKey('IsTrustedLocation')) {
+                    $IsTrustedLocation = Test-LocationIsTrusted -LocationId $Location
+                    Write-Verbose "Using trusted status $IsTrustedLocation from named location $Location"
+                }
+            }
+            else {
+                # If it's not in our named locations, treat it as a display name
+                $foundLocation = $namedLocations.Values | Where-Object { $_.DisplayName -eq $Location } | Select-Object -First 1
+                if ($foundLocation) {
+                    $locationContext.NamedLocationId = $foundLocation.Id
+                    Write-Verbose "Found named location $($foundLocation.Id) with display name $Location"
+
+                    # If it's a named location and no country is specified, use the location's country
+                    if (-not $CountryCode -and $foundLocation.Type -eq "CountryOrRegion") {
+                        $CountryCode = $foundLocation.CountryOrRegion[0]
+                        Write-Verbose "Using country $CountryCode from named location $Location"
+                    }
+
+                    # If no trusted status is specified, use the location's trust status
+                    if (-not $PSBoundParameters.ContainsKey('IsTrustedLocation')) {
+                        $IsTrustedLocation = Test-LocationIsTrusted -NamedLocation $foundLocation
+                        Write-Verbose "Using trusted status $IsTrustedLocation from named location $Location"
+                    }
+                }
+                else {
+                    Write-Warning "Named location '$Location' not found. Using as location name only."
+                    $locationContext.LocationName = $Location
+                }
+            }
+        }
+
+        # Add country code and trusted status to location context
+        if ($CountryCode) {
+            $locationContext.CountryCode = $CountryCode
+        }
+
+        if ($PSBoundParameters.ContainsKey('IsTrustedLocation')) {
+            $locationContext.IsTrustedLocation = $IsTrustedLocation
         }
     }
 
@@ -288,7 +556,7 @@ function Invoke-CAWhatIf {
                 Write-Verbose "Evaluating policy: $($policy.DisplayName) (ID: $($policy.Id))" # General evaluation message
 
                 # Check if policy applies to this sign-in scenario
-                $policyEvaluation = Resolve-CACondition -Policy $policy -UserContext $UserContext -ResourceContext $ResourceContext -DeviceContext $DeviceContext -RiskContext $RiskContext -LocationContext $LocationContext
+                $policyEvaluation = Resolve-CACondition -Policy $policy -UserContext $UserContext -ResourceContext $resourceContext -DeviceContext $DeviceContext -RiskContext $RiskContext -LocationContext $locationContext
 
                 $result.EvaluationDetails = $policyEvaluation.EvaluationDetails
                 $result.Applies = $policyEvaluation.Applies
@@ -308,138 +576,153 @@ function Invoke-CAWhatIf {
                 # --- END OF CORE EVALUATION LOGIC ---
 
 
-                # --- DIAGNOSTIC LOGGING (Remains conditional) ---
+                # --- IMPROVED DIAGNOSTIC LOGGING ---
                 if ($Diagnostic) {
                     $verbosePreference = $VerbosePreference
                     $VerbosePreference = 'Continue' # Temporarily enable verbose for this section
 
-                    Write-Verbose "--- Diagnostic Start: Policy '$($policy.DisplayName)' ---"
-                    Write-Verbose "User ID being evaluated: $UserId ($UserGuid)"
-                    Write-Verbose "Policy State: $($policy.State)"
-                    Write-Verbose "Include Report-Only: $IncludeReportOnly"
+                    # Write policy overview diagnostics
+                    Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                        -Stage "PolicyOverview" -Result $true -Level "Info" `
+                        -Message "Starting policy evaluation" `
+                        -Details @{
+                        State        = $policy.State
+                        UserId       = if ($isServicePrincipal) { $UserContext.Id } else { $UserGuid }
+                        UserType     = if ($isServicePrincipal) { "ServicePrincipal" } else { "User" }
+                        ResourceType = $ResourceContext.Type
+                        ResourceId   = $ResourceContext.AppId
+                    } `
+                        -ExportPath $DiagnosticLogPath
 
-                    # Enhanced diagnostic for user exclusion checking
-                    if ($policy.Conditions.Users.ExcludeUsers) {
-                        Write-Verbose ("Policy excludes these users/GUIDs: {0}" -f ($policy.Conditions.Users.ExcludeUsers -join ', '))
-                        $excludedUserDetails = @()
-                        foreach ($excludedUser in $policy.Conditions.Users.ExcludeUsers) {
-                            # Try to resolve excluded user to get more details
-                            try {
-                                $resolvedExcludedUser = Resolve-UserIdentity -UserIdOrUpn $excludedUser
-                                if ($resolvedExcludedUser.Success) {
-                                    $excludedUserDetails += "{0} ({1})" -f $resolvedExcludedUser.DisplayName, $resolvedExcludedUser.UserPrincipalName
-                                }
-                                else {
-                                    $excludedUserDetails += $excludedUser
-                                }
-                            }
-                            catch {
-                                $excludedUserDetails += $excludedUser
-                            }
-
-                            # Validate if the excluded user is in GUID format
-                            $guidPattern = "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"
-                            $isGuid = $excludedUser -match $guidPattern
-
-                            if ($isGuid) {
-                                # Check for exact GUID match
-                                if ($excludedUser -eq $UserGuid) {
-                                    Write-Verbose ("MATCH FOUND: User ID '{0}' exactly matches excluded user ID '{1}'" -f $UserGuid, $excludedUser)
-                                }
-                                else {
-                                    # Perform a case-insensitive comparison to check for case sensitivity issues
-                                    if ($excludedUser.ToLower() -eq $UserGuid.ToLower()) {
-                                        Write-Verbose ("CASE-SENSITIVE ISSUE: User ID '{0}' matches excluded user ID '{1}' but with different casing" -f $UserGuid, $excludedUser)
-                                    }
-                                    else {
-                                        Write-Verbose ("NO MATCH: User ID '{0}' does not match excluded user ID '{1}'" -f $UserGuid, $excludedUser)
-                                    }
-                                }
-                            }
-                            else {
-                                # Handle UPN comparison if not a GUID
-                                if ($UserPrincipalName) {
-                                    if ($excludedUser -eq $UserPrincipalName) {
-                                        Write-Verbose ("MATCH FOUND: User UPN '{0}' exactly matches excluded user '{1}'" -f $UserPrincipalName, $excludedUser)
-                                    }
-                                    else {
-                                        Write-Verbose ("NO MATCH: User UPN '{0}' does not match excluded user '{1}'" -f $UserPrincipalName, $excludedUser)
-                                    }
-                                }
-                            }
-                        }
-                        Write-Verbose ("Excluded users (resolved): {0}" -f ($excludedUserDetails -join ", "))
-
-                    }
-                    else {
-                        Write-Verbose "No excluded users defined for this policy."
+                    # Write user scope diagnostics
+                    $userScopeDetails = @{
+                        ExcludeUsers  = $policy.Conditions.Users.ExcludeUsers -join ", "
+                        IncludeUsers  = $policy.Conditions.Users.IncludeUsers -join ", "
+                        ExcludeGroups = $policy.Conditions.Users.ExcludeGroups -join ", "
+                        IncludeGroups = $policy.Conditions.Users.IncludeGroups -join ", "
+                        UserInScope   = [bool]($result.EvaluationDetails.UserInScope)
+                        UserReason    = $result.EvaluationDetails.Reasons.User
                     }
 
-                    # Check for groups in the policy conditions
-                    if ($policy.Conditions.Users.IncludeGroups -or $policy.Conditions.Users.ExcludeGroups) {
-                        # Process included groups
-                        if ($policy.Conditions.Users.IncludeGroups) {
-                            Write-Verbose ("Policy includes these groups: {0}" -f ($policy.Conditions.Users.IncludeGroups -join ', '))
-                            $includedGroupChecks = Resolve-GroupMembership -UserId $UserGuid -GroupIds $policy.Conditions.Users.IncludeGroups
-                            if ($includedGroupChecks.Success) {
-                                $memberOfAnyIncludedGroup = $false; $groupDetails = @()
-                                foreach ($group in $includedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyIncludedGroup = $true }
-                                }
-                                Write-Verbose ("User is member of included groups: {0}" -f $memberOfAnyIncludedGroup)
-                                Write-Verbose ("Included groups checks (resolved): {0}" -f ($groupDetails -join ", "))
-                            }
-                            else { Write-Warning "Could not resolve included group membership for diagnostic." }
-                        }
-                        else { Write-Verbose "No included groups defined." }
+                    Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                        -Stage "UserScope" -Result ([bool]($result.EvaluationDetails.UserInScope)) -Level "Info" `
+                        -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.User)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.User }) `
+                        -Details $userScopeDetails `
+                        -ExportPath $DiagnosticLogPath
 
-                        # Process excluded groups
-                        if ($policy.Conditions.Users.ExcludeGroups) {
-                            Write-Verbose ("Policy excludes these groups: {0}" -f ($policy.Conditions.Users.ExcludeGroups -join ', '))
-                            $excludedGroupChecks = Resolve-GroupMembership -UserId $UserGuid -GroupIds $policy.Conditions.Users.ExcludeGroups
-                            if ($excludedGroupChecks.Success) {
-                                $memberOfAnyExcludedGroup = $false; $groupDetails = @()
-                                foreach ($group in $excludedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyExcludedGroup = $true }
-                                }
-                                Write-Verbose ("User is member of excluded groups: {0}" -f $memberOfAnyExcludedGroup)
-                                Write-Verbose ("Excluded groups checks (resolved): {0}" -f ($groupDetails -join ", "))
-                            }
-                            else { Write-Warning "Could not resolve excluded group membership for diagnostic." }
+                    # Write resource scope diagnostics
+                    if ([bool]($result.EvaluationDetails.UserInScope)) {
+                        $resourceScopeDetails = @{
+                            ExcludeApps        = $policy.Conditions.Applications.ExcludeApplications -join ", "
+                            IncludeApps        = $policy.Conditions.Applications.IncludeApplications -join ", "
+                            ExcludeUserActions = $policy.Conditions.Applications.ExcludeUserActions -join ", "
+                            IncludeUserActions = $policy.Conditions.Applications.IncludeUserActions -join ", "
+                            ResourceInScope    = [bool]($result.EvaluationDetails.ResourceInScope)
+                            ResourceReason     = $result.EvaluationDetails.Reasons.Resource
                         }
-                        else { Write-Verbose "No excluded groups defined." }
-                    }
-                    else { Write-Verbose "No include/exclude groups defined." }
 
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "ResourceScope" -Result ([bool]($result.EvaluationDetails.ResourceInScope)) -Level "Info" `
+                            -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.Resource)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.Resource }) `
+                            -Details $resourceScopeDetails `
+                            -ExportPath $DiagnosticLogPath
+                    }
 
-                    # Log the result of the policy evaluation (already performed above)
-                    Write-Verbose "--- Evaluation Result ---"
-                    Write-Verbose "Policy applies: $($result.Applies)"
-                    Write-Verbose "User in scope: $($result.EvaluationDetails.UserInScope)"
-                    Write-Verbose "Resource in scope: $($result.EvaluationDetails.ResourceInScope)"
-                    Write-Verbose "Platform in scope: $($result.EvaluationDetails.DevicePlatformInScope)"
-                    Write-Verbose "Network in scope: $($result.EvaluationDetails.NetworkInScope)"
-                    Write-Verbose "Device state in scope: $($result.EvaluationDetails.DeviceStateInScope)"
-                    Write-Verbose "Risk levels in scope: $($result.EvaluationDetails.RiskLevelsInScope)"
-                    if ($result.Applies) {
-                        Write-Verbose "Access Result: $($result.AccessResult)"
-                        Write-Verbose "Grant Controls Required: $($result.GrantControlsRequired -join ', ')"
-                        Write-Verbose "Session Controls Applied: $($result.SessionControlsApplied -join ', ')"
+                    # Write condition diagnostics if user and resource in scope
+                    if ([bool]($result.EvaluationDetails.UserInScope) -and [bool]($result.EvaluationDetails.ResourceInScope)) {
+                        # Network conditions
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "NetworkConditions" -Result ([bool]($result.EvaluationDetails.NetworkInScope)) -Level "Info" `
+                            -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.Network)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.Network }) `
+                            -Details @{
+                            IncludeLocations = $policy.Conditions.Locations.IncludeLocations -join ", "
+                            ExcludeLocations = $policy.Conditions.Locations.ExcludeLocations -join ", "
+                            IpAddress        = $LocationContext.IpAddress
+                            CountryCode      = $LocationContext.CountryCode
+                            NamedLocationId  = $LocationContext.NamedLocationId
+                        } `
+                            -ExportPath $DiagnosticLogPath
+
+                        # Client app conditions
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "ClientAppConditions" -Result ([bool]($result.EvaluationDetails.ClientAppInScope)) -Level "Info" `
+                            -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.ClientApp)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.ClientApp }) `
+                            -Details @{
+                            ClientAppTypes = $policy.Conditions.ClientAppTypes -join ", "
+                            Specified      = $ResourceContext.ClientAppType
+                        } `
+                            -ExportPath $DiagnosticLogPath
+
+                        # Device platform conditions
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "DevicePlatformConditions" -Result ([bool]($result.EvaluationDetails.DevicePlatformInScope)) -Level "Info" `
+                            -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.DevicePlatform)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.DevicePlatform }) `
+                            -Details @{
+                            IncludePlatforms = $policy.Conditions.Platforms.IncludePlatforms -join ", "
+                            ExcludePlatforms = $policy.Conditions.Platforms.ExcludePlatforms -join ", "
+                            Specified        = $DeviceContext.Platform
+                        } `
+                            -ExportPath $DiagnosticLogPath
+
+                        # Device state conditions
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "DeviceStateConditions" -Result ([bool]($result.EvaluationDetails.DeviceStateInScope)) -Level "Info" `
+                            -Message $(if ([string]::IsNullOrEmpty($result.EvaluationDetails.Reasons.DeviceState)) { "No specific reason provided" } else { $result.EvaluationDetails.Reasons.DeviceState }) `
+                            -Details @{
+                            Compliance       = $DeviceContext.Compliance
+                            JoinType         = $DeviceContext.JoinType
+                            DeviceFilterRule = $policy.Conditions.Devices.DeviceFilter
+                        } `
+                            -ExportPath $DiagnosticLogPath
+
+                        # Risk conditions
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "RiskConditions" -Result ([bool]($result.EvaluationDetails.UserRiskLevelInScope -and $result.EvaluationDetails.SignInRiskLevelInScope)) `
+                            -Level "Info" `
+                            -Message "User risk: $($result.EvaluationDetails.Reasons.UserRiskLevel), Sign-in risk: $($result.EvaluationDetails.Reasons.SignInRiskLevel)" `
+                            -Details @{
+                            UserRiskLevels      = $policy.Conditions.UserRiskLevels -join ", "
+                            SignInRiskLevels    = $policy.Conditions.SignInRiskLevels -join ", "
+                            UserRiskSpecified   = $RiskContext.UserRiskLevel
+                            SignInRiskSpecified = $RiskContext.SignInRiskLevel
+                        } `
+                            -ExportPath $DiagnosticLogPath
                     }
-                    else {
-                        # Add reasoning if available from Resolve-CACondition (assuming Reasons property exists)
-                        if ($result.EvaluationDetails.Reasons) {
-                            Write-Verbose "Reason Not Applied: $($result.EvaluationDetails.Reasons | ConvertTo-Json -Depth 1)"
-                        }
-                        else {
-                            Write-Verbose "Reason Not Applied: Check individual scope conditions."
-                        }
+
+                    # Grant control diagnostics if policy applies
+                    if ([bool]($result.Applies)) {
+                        Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                            -Stage "GrantControls" -Result $true -Level $(if ($result.AccessResult -eq "Blocked") { "Error" } elseif ($result.AccessResult -eq "ConditionallyGranted") { "Warning" } else { "Success" }) `
+                            -Message "Access result: $($result.AccessResult)" `
+                            -Details @{
+                            BuiltInControls  = $policy.GrantControls.BuiltInControls -join ", "
+                            Operator         = $policy.GrantControls._Operator
+                            RequiredControls = $result.GrantControlsRequired -join ", "
+                            SessionControls  = $result.SessionControlsApplied -join ", "
+                        } `
+                            -ExportPath $DiagnosticLogPath
                     }
-                    Write-Verbose "--- Diagnostic End: Policy '$($policy.DisplayName)' ---`n"
+
+                    # Final result
+                    $resultLevel = if (-not $result.Applies) { "Info" }
+                    elseif ($result.AccessResult -eq "Blocked") { "Error" }
+                    elseif ($result.AccessResult -eq "ConditionallyGranted") { "Warning" }
+                    else { "Success" }
+
+                    Write-DiagnosticOutput -PolicyId $policy.Id -PolicyName $policy.DisplayName `
+                        -Stage "FinalResult" -Result ([bool]($result.Applies)) -Level $resultLevel `
+                        -Message $(if ([bool]($result.Applies)) { "Policy applies, access: $($result.AccessResult)" } else { "Policy does not apply" }) `
+                        -Details @{
+                        PolicyApplies          = [bool]($result.Applies)
+                        AccessResult           = $result.AccessResult
+                        GrantControlsRequired  = $result.GrantControlsRequired -join ", "
+                        SessionControlsApplied = $result.SessionControlsApplied -join ", "
+                    } `
+                        -ExportPath $DiagnosticLogPath
 
                     # Restore verbose preference
                     $VerbosePreference = $verbosePreference
-                } # --- END OF DIAGNOSTIC LOGGING ---
+                } # --- END OF IMPROVED DIAGNOSTIC LOGGING ---
 
                 $results += $result
             }
@@ -649,11 +932,22 @@ function Invoke-CAWhatIf {
             # Reset colors
             Write-Host ""
 
+            # Export diagnostic report if requested
+            if ($DiagnosticLogPath) {
+                $reportPath = Join-Path -Path (Split-Path -Path $DiagnosticLogPath -Parent) -ChildPath "ca-diagnostic-report.json"
+                Export-DiagnosticReport -Results $finalResult -Path $reportPath -Format "JSON"
+                Write-Host "Detailed diagnostic report exported to: $reportPath" -ForegroundColor Cyan
+            }
+
             # Return the final result object for pipeline usage
             return $finalResult | Select-Object -Property AccessAllowed, BlockingPolicies, RequiredControls, SessionControls
         }
         elseif ($OutputLevel -eq 'Basic') {
             return $finalResult | Select-Object -Property AccessAllowed, BlockingPolicies, RequiredControls, SessionControls
+        }
+        elseif ($OutputLevel -eq 'MicrosoftFormat') {
+            # Format the results in Microsoft's API format
+            return Format-MicrosoftCAWhatIfResponse -Results $results -FormatType $(if ($AsJson) { 'Json' } else { 'Object' })
         }
         else {
             return $finalResult

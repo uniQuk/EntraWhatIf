@@ -1,0 +1,466 @@
+function Test-NetworkInScope {
+    <#
+    .SYNOPSIS
+        Evaluates if a network location is in scope for a Conditional Access policy.
+
+    .DESCRIPTION
+        This function evaluates if a network location is in scope for a Conditional Access policy
+        based on IP address, named location, and special location combinations.
+
+        It supports:
+        - CIDR notation for IP ranges
+        - Special value combinations ("All", "AllTrusted")
+        - Named location evaluation (trusted vs untrusted)
+        - Country/region-based location matching
+
+    .PARAMETER Policy
+        The Conditional Access policy to evaluate.
+
+    .PARAMETER LocationContext
+        The location context for the sign-in scenario, containing IP address and/or named location information.
+
+    .EXAMPLE
+        Test-NetworkInScope -Policy $policy -LocationContext $LocationContext
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Hashtable])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [object]$Policy,
+
+        [Parameter(Mandatory = $true)]
+        [object]$LocationContext
+    )
+
+    # If no location conditions specified or the locations object is null, all networks are in scope
+    if (-not $Policy.Conditions.Locations -or
+        $null -eq $Policy.Conditions.Locations -or
+        (-not $Policy.Conditions.Locations.PSObject.Properties.Name -contains "IncludeLocations" -and
+        -not $Policy.Conditions.Locations.PSObject.Properties.Name -contains "ExcludeLocations") -or
+        (($null -eq $Policy.Conditions.Locations.IncludeLocations -or
+            $Policy.Conditions.Locations.IncludeLocations.Count -eq 0) -and
+         ($null -eq $Policy.Conditions.Locations.ExcludeLocations -or
+        $Policy.Conditions.Locations.ExcludeLocations.Count -eq 0))) {
+        Write-Verbose "No location conditions specified in policy, all networks are in scope"
+        return @{
+            InScope = $true
+            Reason  = "No location conditions specified"
+        }
+    }
+
+    $includeLocations = $Policy.Conditions.Locations.IncludeLocations
+    $excludeLocations = $Policy.Conditions.Locations.ExcludeLocations
+
+    # Extract location context information
+    $ipAddress = $LocationContext.IpAddress
+    $namedLocationId = $LocationContext.NamedLocationId
+    $countryCode = $LocationContext.CountryCode
+    $isTrustedLocation = $LocationContext.IsTrustedLocation
+
+    Write-Verbose "Testing network scope for policy: $($Policy.DisplayName)"
+    Write-Verbose "IP: $ipAddress, Named Location ID: $namedLocationId, Country: $countryCode, Trusted: $isTrustedLocation"
+
+    # Get all named locations
+    $namedLocations = Get-NamedLocations
+
+    # If named location ID is provided but no trust status, determine it
+    if ($namedLocationId -and -not [bool]::TryParse($isTrustedLocation, [ref]$null)) {
+        $isTrustedLocation = Test-LocationIsTrusted -LocationId $namedLocationId
+        Write-Verbose "Determined trust status from named location: $isTrustedLocation"
+    }
+
+    # Case 1: Include "All" and exclude "AllTrusted" = All untrusted locations
+    if ((Test-SpecialValue -Collection $includeLocations -ValueType "AllLocations") -and
+        (Test-SpecialValue -Collection $excludeLocations -ValueType "AllTrustedLocations")) {
+
+        Write-Verbose "Special case: Include 'All' and exclude 'AllTrusted' = All untrusted locations"
+
+        if ($isTrustedLocation) {
+            return @{
+                InScope = $false
+                Reason  = "Trusted location excluded when policy includes all locations but excludes trusted locations"
+            }
+        }
+        else {
+            return @{
+                InScope = $true
+                Reason  = "Untrusted location included when policy includes all locations but excludes trusted locations"
+            }
+        }
+    }
+
+    # Case 2: Include "All" with no exclusions = All locations
+    if ((Test-SpecialValue -Collection $includeLocations -ValueType "AllLocations") -and
+        ($null -eq $excludeLocations -or $excludeLocations.Count -eq 0)) {
+
+        Write-Verbose "Special case: Include 'All' with no exclusions = All locations"
+
+        return @{
+            InScope = $true
+            Reason  = "All locations included with no exclusions"
+        }
+    }
+
+    # Case 3: Include "AllTrusted" = Only trusted locations
+    if (Test-SpecialValue -Collection $includeLocations -ValueType "AllTrustedLocations") {
+        Write-Verbose "Special case: Include 'AllTrusted' = Only trusted locations"
+
+        if ($isTrustedLocation) {
+            return @{
+                InScope = $true
+                Reason  = "Trusted location included when policy includes all trusted locations"
+            }
+        }
+        else {
+            return @{
+                InScope = $false
+                Reason  = "Untrusted location excluded when policy includes only trusted locations"
+            }
+        }
+    }
+
+    # Check if location is excluded
+    if ($excludeLocations -and $excludeLocations.Count -gt 0) {
+        # Check if named location ID is explicitly excluded
+        if ($namedLocationId -and $excludeLocations -contains $namedLocationId) {
+            Write-Verbose "Named location ID '$namedLocationId' explicitly excluded"
+            return @{
+                InScope = $false
+                Reason  = "Named location explicitly excluded"
+            }
+        }
+
+        # Check each excluded location
+        foreach ($locationId in $excludeLocations) {
+            # Skip special values which were handled above
+            if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
+                continue
+            }
+
+            # Check if the location exists in our cache
+            if (-not $namedLocations.ContainsKey($locationId)) {
+                Write-Verbose "Excluded location ID '$locationId' not found in cache, skipping"
+                continue
+            }
+
+            $excludedLocation = $namedLocations[$locationId]
+
+            # Check if IP matches an excluded location
+            if ($ipAddress -and $excludedLocation.Type -eq "IP") {
+                if (Test-LocationContainsIp -NamedLocation $excludedLocation -IpAddress $ipAddress) {
+                    Write-Verbose "IP address '$ipAddress' in excluded named location '$($excludedLocation.DisplayName)'"
+                    return @{
+                        InScope = $false
+                        Reason  = "IP address in excluded named location"
+                    }
+                }
+            }
+
+            # Check if country code matches an excluded location
+            if ($countryCode -and $excludedLocation.Type -eq "CountryOrRegion") {
+                if (Test-LocationContainsCountry -NamedLocation $excludedLocation -CountryCode $countryCode) {
+                    Write-Verbose "Country code '$countryCode' in excluded named location '$($excludedLocation.DisplayName)'"
+                    return @{
+                        InScope = $false
+                        Reason  = "Country in excluded named location"
+                    }
+                }
+            }
+        }
+    }
+
+    # Check if location is included (if no special "All" value handled above)
+    $isIncluded = $false
+    $includeReason = ""
+
+    if ($includeLocations -and $includeLocations.Count -gt 0) {
+        # Check if named location ID is explicitly included
+        if ($namedLocationId -and $includeLocations -contains $namedLocationId) {
+            Write-Verbose "Named location ID '$namedLocationId' explicitly included"
+            $isIncluded = $true
+            $includeReason = "Named location explicitly included"
+        }
+        else {
+            # Check each included location
+            foreach ($locationId in $includeLocations) {
+                # Skip special values which were handled above
+                if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
+                    continue
+                }
+
+                # Check if the location exists in our cache
+                if (-not $namedLocations.ContainsKey($locationId)) {
+                    Write-Verbose "Included location ID '$locationId' not found in cache, skipping"
+                    continue
+                }
+
+                $includedLocation = $namedLocations[$locationId]
+
+                # Check if IP matches an included location
+                if ($ipAddress -and $includedLocation.Type -eq "IP") {
+                    if (Test-LocationContainsIp -NamedLocation $includedLocation -IpAddress $ipAddress) {
+                        Write-Verbose "IP address '$ipAddress' in included named location '$($includedLocation.DisplayName)'"
+                        $isIncluded = $true
+                        $includeReason = "IP address in included named location"
+                        break
+                    }
+                }
+
+                # Check if country code matches an included location
+                if ($countryCode -and $includedLocation.Type -eq "CountryOrRegion") {
+                    if (Test-LocationContainsCountry -NamedLocation $includedLocation -CountryCode $countryCode) {
+                        Write-Verbose "Country code '$countryCode' in included named location '$($includedLocation.DisplayName)'"
+                        $isIncluded = $true
+                        $includeReason = "Country in included named location"
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    # Determine final result
+    if ($isIncluded) {
+        return @{
+            InScope = $true
+            Reason  = $includeReason
+        }
+    }
+    else {
+        return @{
+            InScope = $false
+            Reason  = "Location not in any inclusion lists"
+        }
+    }
+}
+
+function Test-IpInNamedLocation {
+    <#
+.SYNOPSIS
+    Tests if an IP address is contained within a named location.
+
+.DESCRIPTION
+    This function evaluates if an IP address falls within any of the
+    IP ranges defined in a named location, supporting CIDR notation.
+
+.PARAMETER IpAddress
+    The IP address to check.
+
+.PARAMETER NamedLocation
+    The named location object containing IP ranges.
+
+.EXAMPLE
+    Test-IpInNamedLocation -IpAddress "192.168.1.1" -NamedLocation $namedLocation
+#>
+    [CmdletBinding()]
+    [OutputType([System.Boolean])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$IpAddress,
+
+        [Parameter(Mandatory = $true)]
+        [object]$NamedLocation
+    )
+
+    # If named location has no IP ranges, the IP cannot be in it
+    if (-not $NamedLocation.IpRanges -or $NamedLocation.IpRanges.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($ipRange in $NamedLocation.IpRanges) {
+        # Check if range is in CIDR notation
+        if ($ipRange -match "^(.+)/(\d+)$") {
+            $networkAddress = $matches[1]
+            $cidrPrefix = [int]$matches[2]
+
+            if (Test-IpInCidrRange -IpAddress $IpAddress -NetworkAddress $networkAddress -CidrPrefix $cidrPrefix) {
+                return $true
+            }
+        }
+        # Check if range is a simple IP address (exact match)
+        elseif ($ipRange -eq $IpAddress) {
+            return $true
+        }
+        # Check if range is in start-end format
+        elseif ($ipRange -match "^(.+)-(.+)$") {
+            $startIp = $matches[1]
+            $endIp = $matches[2]
+
+            if (Test-IpInRange -IpAddress $IpAddress -StartIp $startIp -EndIp $endIp) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Test-IpInCidrRange {
+    <#
+.SYNOPSIS
+    Tests if an IP address is within a CIDR range.
+
+.DESCRIPTION
+    This function determines if an IP address falls within the range
+    specified by a network address and CIDR prefix.
+
+.PARAMETER IpAddress
+    The IP address to check.
+
+.PARAMETER NetworkAddress
+    The network address of the CIDR range.
+
+.PARAMETER CidrPrefix
+    The CIDR prefix (subnet mask) of the range.
+
+.EXAMPLE
+    Test-IpInCidrRange -IpAddress "192.168.1.1" -NetworkAddress "192.168.0.0" -CidrPrefix 16
+#>
+    [CmdletBinding()]
+    [OutputType([System.Boolean])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$IpAddress,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NetworkAddress,
+
+        [Parameter(Mandatory = $true)]
+        [int]$CidrPrefix
+    )
+
+    try {
+        # Convert IP address string to bytes
+        $ipBytes = [System.Net.IPAddress]::Parse($IpAddress).GetAddressBytes()
+
+        # Convert network address string to bytes
+        $networkBytes = [System.Net.IPAddress]::Parse($NetworkAddress).GetAddressBytes()
+
+        # If IPv6, handle separately
+        if ($ipBytes.Length -ne 4) {
+            Write-Verbose "IPv6 address detected. IPv6 handling not fully implemented."
+            return $false # For now, we'll skip IPv6 handling for simplicity
+        }
+
+        # Calculate subnet mask from CIDR prefix
+        $mask = [UInt32](-bnot (([UInt32]1 -shl (32 - $CidrPrefix)) - 1))
+
+        # Convert IP address and network to integers for comparison
+        $ipInt = ([UInt32]$ipBytes[0] -shl 24) -bor ([UInt32]$ipBytes[1] -shl 16) -bor ([UInt32]$ipBytes[2] -shl 8) -bor $ipBytes[3]
+        $networkInt = ([UInt32]$networkBytes[0] -shl 24) -bor ([UInt32]$networkBytes[1] -shl 16) -bor ([UInt32]$networkBytes[2] -shl 8) -bor $networkBytes[3]
+
+        # Apply mask to both IP and network, then compare
+        return (($ipInt -band $mask) -eq ($networkInt -band $mask))
+    }
+    catch {
+        Write-Warning "Error testing IP in CIDR range: $_"
+        return $false
+    }
+}
+
+function Test-IpInRange {
+    <#
+.SYNOPSIS
+    Tests if an IP address is within a range specified by start and end IPs.
+
+.DESCRIPTION
+    This function determines if an IP address falls between a start and end IP address.
+
+.PARAMETER IpAddress
+    The IP address to check.
+
+.PARAMETER StartIp
+    The starting IP address of the range.
+
+.PARAMETER EndIp
+    The ending IP address of the range.
+
+.EXAMPLE
+    Test-IpInRange -IpAddress "192.168.1.10" -StartIp "192.168.1.1" -EndIp "192.168.1.20"
+#>
+    [CmdletBinding()]
+    [OutputType([System.Boolean])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$IpAddress,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StartIp,
+
+        [Parameter(Mandatory = $true)]
+        [string]$EndIp
+    )
+
+    try {
+        # Convert IP addresses to bytes
+        $ipBytes = [System.Net.IPAddress]::Parse($IpAddress).GetAddressBytes()
+        $startBytes = [System.Net.IPAddress]::Parse($StartIp).GetAddressBytes()
+        $endBytes = [System.Net.IPAddress]::Parse($EndIp).GetAddressBytes()
+
+        # If IPv6, handle separately
+        if ($ipBytes.Length -ne 4) {
+            Write-Verbose "IPv6 address detected. IPv6 handling not fully implemented."
+            return $false # For now, we'll skip IPv6 handling for simplicity
+        }
+
+        # Convert IP addresses to integers for comparison
+        $ipInt = ([UInt32]$ipBytes[0] -shl 24) -bor ([UInt32]$ipBytes[1] -shl 16) -bor ([UInt32]$ipBytes[2] -shl 8) -bor $ipBytes[3]
+        $startInt = ([UInt32]$startBytes[0] -shl 24) -bor ([UInt32]$startBytes[1] -shl 16) -bor ([UInt32]$startBytes[2] -shl 8) -bor $startBytes[3]
+        $endInt = ([UInt32]$endBytes[0] -shl 24) -bor ([UInt32]$endBytes[1] -shl 16) -bor ([UInt32]$endBytes[2] -shl 8) -bor $endBytes[3]
+
+        # Check if IP is within the range
+        return ($ipInt -ge $startInt -and $ipInt -le $endInt)
+    }
+    catch {
+        Write-Warning "Error testing IP in range: $_"
+        return $false
+    }
+}
+
+function Get-NamedLocation {
+    <#
+.SYNOPSIS
+    Retrieves a named location by ID.
+
+.DESCRIPTION
+    This function retrieves a named location from Microsoft Graph API or from a cache.
+    It supports retrieving both IP-based and country/region-based named locations.
+
+.PARAMETER LocationId
+    The ID of the named location to retrieve.
+
+.EXAMPLE
+    Get-NamedLocation -LocationId "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+#>
+    [CmdletBinding()]
+    [OutputType([System.Object])]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$LocationId
+    )
+
+    # Check if location is in cache
+    if ($script:NamedLocationsCache -and $script:NamedLocationsCache.ContainsKey($LocationId)) {
+        Write-Verbose "Retrieved named location '$LocationId' from cache"
+        return $script:NamedLocationsCache[$LocationId]
+    }
+
+    try {
+        # Retrieve named location from Graph API
+        $location = Get-MgIdentityConditionalAccessNamedLocation -NamedLocationId $LocationId
+
+        # Initialize cache if not exists
+        if (-not $script:NamedLocationsCache) {
+            $script:NamedLocationsCache = @{}
+        }
+
+        # Add to cache
+        $script:NamedLocationsCache[$LocationId] = $location
+
+        return $location
+    }
+    catch {
+        Write-Warning "Error retrieving named location '$LocationId': $_"
+        return $null
+    }
+}
