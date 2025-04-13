@@ -46,6 +46,16 @@ function Test-DeviceFilter {
     $mode = $FilterRule.mode
     $rules = $FilterRule.rule
 
+    # Check if this is a KQL-style rule string rather than structured rules
+    if ($rules -is [string]) {
+        Write-Verbose "KQL-style filter rule detected: $rules"
+        # For now, always return true for KQL rules until we implement a KQL parser
+        return @{
+            Matches = $true
+            Reason  = "KQL-style filter rule not fully evaluated yet: $rules"
+        }
+    }
+
     Write-Verbose "Evaluating device filter: Mode=$mode, Rules count=$(if ($rules) { $rules.Count } else { 0 })"
 
     # Handle null device context based on mode
@@ -68,7 +78,7 @@ function Test-DeviceFilter {
     }
 
     # If no rules specified, device matches based on mode
-    if (-not $rules -or $rules.Count -eq 0) {
+    if (-not $rules -or (($rules -isnot [string]) -and (($rules -is [array] -and $rules.Count -eq 0) -or ($rules -isnot [array])))) {
         # If mode is null or empty and rules are empty, this is essentially a non-filter, so match everything
         if ([string]::IsNullOrEmpty($mode)) {
             Write-Verbose "Empty filter with no mode specified matches everything"
@@ -96,9 +106,39 @@ function Test-DeviceFilter {
 
     # Evaluate each rule
     foreach ($rule in $rules) {
-        $operator = $rule.operator
-        $operand = $rule.operand
-        $value = $rule.value
+        # Check if rule is null or not an object with properties
+        if ($null -eq $rule -or ($rule -isnot [PSCustomObject] -and $rule -isnot [Hashtable])) {
+            Write-Warning "Invalid rule format encountered, skipping: $rule"
+            continue
+        }
+
+        # Safely access rule properties with null checks
+        $operator = if ($null -ne $rule.PSObject.Properties['operator']) { $rule.operator } else { $null }
+        $operand = if ($null -ne $rule.PSObject.Properties['operand']) { $rule.operand } else { $null }
+        $value = if ($null -ne $rule.PSObject.Properties['value']) { $rule.value } else { $null }
+
+        # Handle KQL-style rules (present as a string in the rule property instead of structured format)
+        if ($null -eq $operand -and $null -eq $operator -and $null -eq $value) {
+            # This might be a KQL-style rule string
+            if ($rule -is [string] -or ($rule.PSObject.Properties['rule'] -and $rule.rule -is [string])) {
+                $ruleString = if ($rule -is [string]) { $rule } else { $rule.rule }
+                Write-Verbose "KQL-style filter rule detected within rules array: $ruleString"
+
+                # For KQL-style rules, we need to handle more complex evaluation
+                # Just return a match for now - in future this should be enhanced to interpret KQL
+                return @{
+                    Matches = $true
+                    Reason  = "KQL-style device filter rule is not fully evaluated yet: $ruleString"
+                }
+            }
+        }
+
+        # Guard against null operands
+        if ($null -eq $operand) {
+            Write-Warning "Null operand in device filter rule"
+            # Continue to next rule if there is one, otherwise this will fail the match
+            continue
+        }
 
         # Get the device property value
         # Handle nested properties with dot notation (e.g., "deviceState.isCompliant")

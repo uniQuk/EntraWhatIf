@@ -121,10 +121,19 @@ function Resolve-GroupMembership {
                 else {
                     # Try to get the group name anyway for reporting
                     try {
-                        $groupDetails = Get-MgGroup -GroupId $groupId -ErrorAction Stop
-                        $groupDetails.DisplayName
+                        $errorOutput = $null
+                        $groupDetails = Get-MgGroup -GroupId $groupId -ErrorAction SilentlyContinue -ErrorVariable errorOutput
+                        if ($errorOutput) {
+                            Write-DiagnosticOutput -Source "Resolve-GroupMembership" -Message "Group ID $groupId not found or inaccessible (this is normal for non-existent groups)" -Level "Debug"
+                            "Unknown Group"
+                        }
+                        else {
+                            $groupDetails.DisplayName
+                        }
                     }
                     catch {
+                        $errorMessage = $_.Exception.Message
+                        Write-DiagnosticOutput -Source "Resolve-GroupMembership" -Message "Error retrieving group details: $errorMessage" -Level "Debug"
                         "Unknown Group"
                     }
                 }

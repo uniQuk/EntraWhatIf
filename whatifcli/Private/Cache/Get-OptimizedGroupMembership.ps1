@@ -83,13 +83,56 @@ function Get-OptimizedGroupMembership {
 
             if ($entityType -eq "user") {
                 # Use transitive member of to get all groups (direct and nested)
-                $uri = "/users/$entityId/transitiveMemberOf?`$select=id,displayName"
-                $groups = Invoke-MgGraphRequest -Method GET -Uri $uri | Select-Object -ExpandProperty value
+                try {
+                    $uri = "/users/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    Write-Verbose "Requesting group membership from Graph API: $uri"
+                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+
+                    # Enhanced debugging to see the actual API response
+                    Write-Verbose "Graph API response received with $(($response.value).Count) groups"
+
+                    if ($response.value) {
+                        $groups = $response.value
+                        Write-Verbose "User is a member of these groups: $($groups.id -join ', ')"
+                    }
+                    else {
+                        Write-Verbose "No groups found for user $entityId"
+                        $groups = @()
+                    }
+                }
+                catch {
+                    # Check if this is a "Not Found" error (entity doesn't exist)
+                    if ($_.Exception.Response.StatusCode -eq "NotFound") {
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "User with ID $entityId not found. Returning empty group list." -Level "Warning"
+                        # Return empty array instead of throwing error
+                        $groups = @()
+                    }
+                    else {
+                        $errorDetails = "Status: $($_.Exception.Response.StatusCode), Message: $($_.Exception.Message)"
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Error retrieving group membership: $errorDetails" -Level "Warning"
+                        # Return empty array for graceful fallback
+                        $groups = @()
+                    }
+                }
             }
             else {
                 # For service principals
-                $uri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName"
-                $groups = Invoke-MgGraphRequest -Method GET -Uri $uri | Select-Object -ExpandProperty value
+                try {
+                    $uri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    $groups = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop | Select-Object -ExpandProperty value
+                }
+                catch {
+                    # Check if this is a "Not Found" error (entity doesn't exist)
+                    if ($_.Exception.Response.StatusCode -eq "NotFound") {
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Service Principal with ID $entityId not found. Returning empty group list." -Level "Warning"
+                        # Return empty array instead of throwing error
+                        $groups = @()
+                    }
+                    else {
+                        # For other errors, re-throw
+                        throw $_
+                    }
+                }
             }
 
             # Update cache
@@ -97,7 +140,8 @@ function Get-OptimizedGroupMembership {
             $script:GroupMembershipCacheTime[$cacheKey] = [DateTime]::Now
         }
         catch {
-            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Failed to retrieve group memberships: $_" -Level "Error"
+            $errorMessage = $_.Exception.Message
+            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Failed to retrieve group memberships: $errorMessage" -Level "Error"
             throw $_
         }
     }
