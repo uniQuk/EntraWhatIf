@@ -378,15 +378,118 @@ function Test-NetworkInScope {
 
     # Helper function to check if an IP is in a named location
     function Test-IpInNamedLocation {
+        [CmdletBinding()]
         param (
+            [Parameter(Mandatory = $true)]
             [string]$IpAddress,
+
+            [Parameter(Mandatory = $true)]
             [string]$LocationId
         )
 
-        # For now, we'll just compare the location name
-        # In a real implementation, we'd need to fetch the named location definitions
-        # and perform proper IP address matching
-        return ($LocationContext.NamedLocation -eq $LocationId)
+        Write-Verbose "Testing if IP '$IpAddress' is in named location with ID '$LocationId'"
+
+        # Check if we have the named location in our context
+        if (-not $LocationContext.NamedLocations -or $LocationContext.NamedLocations.Count -eq 0) {
+            Write-Verbose "No named locations available in context"
+            return $false
+        }
+
+        # Find the named location
+        $namedLocation = $LocationContext.NamedLocations | Where-Object { $_.Id -eq $LocationId }
+        if (-not $namedLocation) {
+            Write-Verbose "Named location with ID '$LocationId' not found"
+            return $false
+        }
+
+        Write-Verbose "Found named location: $($namedLocation.DisplayName)"
+
+        # Check if it's an IP-based location
+        if ($namedLocation.'@odata.type' -eq "#microsoft.graph.ipNamedLocation") {
+            Write-Verbose "Location is an IP-based location"
+
+            # Try to parse the input IP address
+            try {
+                $ipObj = [System.Net.IPAddress]::Parse($IpAddress)
+                Write-Verbose "IP address is valid"
+            }
+            catch {
+                Write-Verbose "Invalid IP address format: $IpAddress"
+                return $false
+            }
+
+            # Check if the IP is in any of the CIDR ranges
+            foreach ($range in $namedLocation.IpRanges) {
+                if ($range.'@odata.type' -eq "#microsoft.graph.iPv4CidrRange") {
+                    $cidrAddress = $range.cidrAddress
+                    Write-Verbose "Testing CIDR range: $cidrAddress"
+
+                    # Split CIDR notation into IP and prefix
+                    $parts = $cidrAddress.Split('/')
+                    if ($parts.Length -ne 2) {
+                        Write-Verbose "Invalid CIDR format: $cidrAddress"
+                        continue
+                    }
+
+                    $networkAddress = $parts[0]
+                    $prefixLength = [int]$parts[1]
+
+                    # Convert IP addresses to integers for comparison
+                    $ipInt = ConvertTo-IPv4Int $IpAddress
+                    $networkInt = ConvertTo-IPv4Int $networkAddress
+
+                    # Calculate the bitmask for the prefix length
+                    $mask = ([System.Math]::Pow(2, 32) - 1) -shl (32 - $prefixLength)
+
+                    # Check if the IP is in the network
+                    $ipNetwork = $ipInt -band $mask
+                    $isInRange = $ipNetwork -eq ($networkInt -band $mask)
+
+                    Write-Verbose "IP in range: $isInRange"
+                    if ($isInRange) {
+                        return $true
+                    }
+                }
+                else {
+                    Write-Verbose "Skipping non-IPv4 range: $($range.'@odata.type')"
+                }
+            }
+
+            Write-Verbose "IP $IpAddress is not in any CIDR range of the named location"
+            return $false
+        }
+        elseif ($namedLocation.'@odata.type' -eq "#microsoft.graph.countryNamedLocation") {
+            # For country-based locations, we'll rely on the country code in the LocationContext
+            Write-Verbose "Location is a country-based location"
+
+            if (-not $LocationContext.CountryCode) {
+                Write-Verbose "No country code specified in the context"
+                return $false
+            }
+
+            $isInCountryList = $namedLocation.CountriesAndRegions -contains $LocationContext.CountryCode
+            $includeUnknown = $namedLocation.IncludeUnknownCountriesAndRegions
+
+            Write-Verbose "Country '$($LocationContext.CountryCode)' in list: $isInCountryList"
+            Write-Verbose "Include unknown countries: $includeUnknown"
+
+            return $isInCountryList -or ($includeUnknown -and -not $LocationContext.CountryCode)
+        }
+
+        Write-Verbose "Location type is not supported: $($namedLocation.'@odata.type')"
+        return $false
+    }
+
+    # Helper function to convert an IPv4 address to an integer
+    function ConvertTo-IPv4Int {
+        param (
+            [string]$IpAddress
+        )
+
+        $bytes = [System.Net.IPAddress]::Parse($IpAddress).GetAddressBytes()
+        # Reverse for network byte order
+        [Array]::Reverse($bytes)
+        return [BitConverter]::ToUInt32($bytes, 0)
     }
 
     # Check if location is explicitly excluded
@@ -539,7 +642,7 @@ function Test-DeviceStateInScope {
     return $true
 }
 
-function Evaluate-DeviceFilter {
+function Test-DeviceFilter {
     [CmdletBinding()]
     [OutputType([System.Boolean])]
     param (
@@ -582,14 +685,14 @@ function Evaluate-DeviceFilter {
         }
 
         # Evaluate the condition
-        $matches = $false
+        $filterMatches = $false
         switch ($operator) {
-            "-eq" { $matches = ($actualValue -eq $value) }
-            "-ne" { $matches = ($actualValue -ne $value) }
-            default { $matches = $false }
+            "-eq" { $filterMatches = ($actualValue -eq $value) }
+            "-ne" { $filterMatches = ($actualValue -ne $value) }
+            default { $filterMatches = $false }
         }
 
-        return $matches
+        return $filterMatches
     }
 
     # Handle include/exclude filter mode for joinType
@@ -615,17 +718,17 @@ function Evaluate-DeviceFilter {
                 }
 
                 # Check if the device join type matches any of the values
-                $matchesJoinType = $false
+                $filterMatches = $false
                 foreach ($value in $values) {
                     $mappedValue = $joinTypeMap[$value]
                     if ($mappedValue -and $Device.JoinType -eq $mappedValue) {
-                        $matchesJoinType = $true
+                        $filterMatches = $true
                         break
                     }
                 }
             }
             default {
-                $matchesJoinType = $false
+                $filterMatches = $false
             }
         }
 
@@ -633,10 +736,10 @@ function Evaluate-DeviceFilter {
         $filterMode = if ($operator -eq "-in") { "include" } else { "exclude" }
 
         if ($filterMode -eq "include") {
-            return $matchesJoinType
+            return $filterMatches
         }
         elseif ($filterMode -eq "exclude") {
-            return -not $matchesJoinType
+            return -not $filterMatches
         }
     }
 

@@ -518,111 +518,136 @@ function Invoke-CAWhatIf {
             Write-Host "`nPolicy Counts:" -ForegroundColor Cyan
             Write-Host "Total Policies: $totalCount (Enabled: $enabledCount, Report-Only: $reportOnlyCount, Disabled: $disabledCount)" -ForegroundColor White
             Write-Host "Applicable to this scenario: $applicableCount" -ForegroundColor White
-            # Write-Host "`nNote: Only enabled policies affect the final access decision." -ForegroundColor Yellow # Commented out as all applicable policies are now considered
 
             Write-Host "`nPolicy Evaluation Details:" -ForegroundColor Cyan
             Write-Host "===============================================================" -ForegroundColor Cyan
 
-            # Create formatted table for each policy result
-            $policyTable = @()
-            foreach ($result in $results) {
-                # Prepare colored output strings
-                $appliesDisplay = if ($result.Applies) {
-                    $Host.UI.RawUI.ForegroundColor = "Green"
-                    "YES"
+            # Sort policies: applicable policies first, then by state (enabled, report-only, disabled)
+            $sortedResults = $results | ForEach-Object {
+                $_ | Add-Member -NotePropertyName AppliesSortOrder -NotePropertyValue $(if ($_.Applies) { 1 } else { 2 }) -PassThru |
+                    Add-Member -NotePropertyName StateSortOrder -NotePropertyValue $(
+                        switch ($_.State) {
+                            "enabled" { 1 }
+                            "enabledForReportingButNotEnforced" { 2 }
+                            "disabled" { 3 }
+                            default { 4 }
+                        }
+                    ) -PassThru
+                } | Sort-Object -Property AppliesSortOrder, StateSortOrder
+
+            # Define column widths
+            $nameWidth = 40
+            $stateWidth = 12
+            $appliesWidth = 10
+            $conditionsWidth = 25
+            $resultWidth = 12
+            $reasonWidth = 30
+
+            # Write table header
+            Write-Host ("{0,-$nameWidth} {1,-$stateWidth} {2,-$appliesWidth} {3,-$conditionsWidth} {4,-$resultWidth} {5,-$reasonWidth}" -f
+                "Policy Name", "State", "Applies", "Conditions", "Result", "Reason/Controls") -ForegroundColor Cyan
+            Write-Host ("{0,-$nameWidth} {1,-$stateWidth} {2,-$appliesWidth} {3,-$conditionsWidth} {4,-$resultWidth} {5,-$reasonWidth}" -f
+                ("-" * ($nameWidth - 1)), ("-" * ($stateWidth - 1)), ("-" * ($appliesWidth - 1)), ("-" * ($conditionsWidth - 1)), ("-" * ($resultWidth - 1)), ("-" * ($reasonWidth - 1))) -ForegroundColor Cyan
+
+            # Write each policy row with proper coloring
+            foreach ($result in $sortedResults) {
+                # Truncate policy name if too long
+                $policyName = $result.DisplayName
+                if ($policyName.Length -gt $nameWidth - 3) {
+                    $policyName = $policyName.Substring(0, $nameWidth - 6) + "..."
+                }
+
+                # Format the state column
+                $stateText = switch ($result.State) {
+                    "enabled" { "Enabled" }
+                    "enabledForReportingButNotEnforced" { "Report" }
+                    "disabled" { "Disabled" }
+                    default { "Unknown" }
+                }
+
+                # Format the applies column
+                $appliesText = if ($result.Applies) { "YES" } else { "NO" }
+
+                # Format the conditions column
+                $conditions = "{0}{1}{2}{3}" -f
+                $(if ($result.EvaluationDetails.UserInScope) { "U✓" } else { "U✗" }),
+                $(if ($result.EvaluationDetails.ResourceInScope) { " A✓" } else { " A✗" }),
+                $(if ($result.EvaluationDetails.DevicePlatformInScope) { " P✓" } else { " P✗" }),
+                $(if ($result.EvaluationDetails.NetworkInScope) { " N✓" } else { " N✗" })
+
+                # Format the result column
+                $resultText = if ($result.Applies) {
+                    switch ($result.AccessResult) {
+                        "Blocked" { "BLOCKED" }
+                        "Granted" { "GRANTED" }
+                        "ConditionallyGranted" { "CONDITIONAL" }
+                        default { "-" }
+                    }
+                }
+                else { "-" }
+
+                # Format the reason/controls column
+                $reasonOrControls = if (-not $result.Applies) {
+                    if (-not $result.EvaluationDetails.UserInScope) {
+                        # Use the detailed reason from evaluation if available
+                        if ($result.EvaluationDetails.Reasons -and $result.EvaluationDetails.Reasons.User) {
+                            $result.EvaluationDetails.Reasons.User
+                        }
+                        else {
+                            "User not in scope"
+                        }
+                    }
+                    elseif (-not $result.EvaluationDetails.ResourceInScope) { "App not in scope" }
+                    elseif (-not $result.EvaluationDetails.DevicePlatformInScope) { "Platform not in scope" }
+                    elseif (-not $result.EvaluationDetails.NetworkInScope) { "Network not in scope" }
+                    elseif (-not $result.EvaluationDetails.DeviceStateInScope) { "Device state not in scope" }
+                    elseif (-not $result.EvaluationDetails.RiskLevelsInScope) { "Risk level not in scope" }
+                    else { "Not applicable" }
                 }
                 else {
-                    $Host.UI.RawUI.ForegroundColor = "DarkGray"
-                    "NO"
+                    ($result.GrantControlsRequired -join ", ")
                 }
-                $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
-                $stateDisplay = switch ($result.State) {
-                    "enabled" {
-                        $Host.UI.RawUI.ForegroundColor = "Green"
-                        "Enabled"
-                    }
-                    "enabledForReportingButNotEnforced" {
-                        $Host.UI.RawUI.ForegroundColor = "Yellow"
-                        "Report-Only"
-                    }
-                    "disabled" {
-                        $Host.UI.RawUI.ForegroundColor = "DarkGray"
-                        "Disabled"
-                    }
-                    default {
-                        $Host.UI.RawUI.ForegroundColor = "DarkGray"
-                        "Disabled"
-                    }
+                # Truncate reason/controls if too long
+                if ($reasonOrControls.Length -gt $reasonWidth - 3) {
+                    $reasonOrControls = $reasonOrControls.Substring(0, $reasonWidth - 6) + "..."
                 }
-                $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
-                $resultDisplay = switch ($result.AccessResult) {
-                    "Blocked" {
-                        $Host.UI.RawUI.ForegroundColor = "Red"
-                        "BLOCKED"
-                    }
-                    "Granted" {
-                        $Host.UI.RawUI.ForegroundColor = "Green"
-                        "GRANTED"
-                    }
-                    "ConditionallyGranted" {
-                        $Host.UI.RawUI.ForegroundColor = "Yellow"
-                        "CONDITIONAL"
-                    }
-                    default { "-" }
-                }
-                $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
+                # Write row with appropriate colors
+                Write-Host ("{0,-$nameWidth} " -f $policyName) -NoNewline
 
-                # Create custom object for the table
-                $policyObj = [PSCustomObject]@{
-                    PolicyName       = $result.DisplayName
-                    State            = $stateDisplay
-                    Applies          = $appliesDisplay
-                    "User"           = if ($result.EvaluationDetails.UserInScope) { "✓" } else { "✗" }
-                    "App"            = if ($result.EvaluationDetails.ResourceInScope) { "✓" } else { "✗" }
-                    "Platform"       = if ($result.EvaluationDetails.DevicePlatformInScope) { "✓" } else { "✗" }
-                    "Network"        = if ($result.EvaluationDetails.NetworkInScope) { "✓" } else { "✗" }
-                    Result           = $resultDisplay
-                    Controls         = if ($result.Applies) { ($result.GrantControlsRequired -join ", ") } else { "" }
-                    Reason           = if (-not $result.Applies) {
-                        if (-not $result.EvaluationDetails.UserInScope) {
-                            # Use the detailed reason from evaluation if available
-                            if ($result.EvaluationDetails.Reasons -and $result.EvaluationDetails.Reasons.User) {
-                                $result.EvaluationDetails.Reasons.User
-                            }
-                            else {
-                                "User not in scope"
-                            }
-                        }
-                        elseif (-not $result.EvaluationDetails.ResourceInScope) { "App not in scope" }
-                        elseif (-not $result.EvaluationDetails.DevicePlatformInScope) { "Platform not in scope" }
-                        elseif (-not $result.EvaluationDetails.NetworkInScope) { "Network not in scope" }
-                        elseif (-not $result.EvaluationDetails.DeviceStateInScope) { "Device state not in scope" }
-                        elseif (-not $result.EvaluationDetails.RiskLevelsInScope) { "Risk level not in scope" }
-                        else { "Not applicable" }
-                    }
-                    else { "" }
-                    # Add ordering properties for sorting
-                    AppliesSortOrder = if ($result.Applies) { 1 } else { 2 }
-                    StateSortOrder   = switch ($result.State) {
-                        "enabled" { 1 }
-                        "enabledForReportingButNotEnforced" { 2 }
-                        "disabled" { 3 }
-                        default { 4 }
-                    }
+                # State with color
+                $stateColor = switch ($result.State) {
+                    "enabled" { "Green" }
+                    "enabledForReportingButNotEnforced" { "Yellow" }
+                    "disabled" { "DarkGray" }
+                    default { "DarkGray" }
                 }
-                $policyTable += $policyObj
+                Write-Host ("{0,-$stateWidth} " -f $stateText) -NoNewline -ForegroundColor $stateColor
+
+                # Applies with color
+                $appliesColor = if ($result.Applies) { "Green" } else { "DarkGray" }
+                Write-Host ("{0,-$appliesWidth} " -f $appliesText) -NoNewline -ForegroundColor $appliesColor
+
+                # Conditions - mix of colors
+                Write-Host ("{0,-$conditionsWidth} " -f $conditions) -NoNewline
+
+                # Result with color
+                $resultColor = switch ($result.AccessResult) {
+                    "Blocked" { "Red" }
+                    "Granted" { "Green" }
+                    "ConditionallyGranted" { "Yellow" }
+                    default { "White" }
+                }
+                Write-Host ("{0,-$resultWidth} " -f $resultText) -NoNewline -ForegroundColor $resultColor
+
+                # Reason/Controls
+                $reasonColor = if ($result.Applies) { "Yellow" } else { "DarkGray" }
+                Write-Host ("{0,-$reasonWidth}" -f $reasonOrControls) -ForegroundColor $reasonColor
             }
 
-            # Sort the table: applicable policies first, then by state (enabled, report-only, disabled)
-            $policyTable = $policyTable | Sort-Object -Property AppliesSortOrder, StateSortOrder | Select-Object -Property PolicyName, State, Applies, User, App, Platform, Network, Result, Controls, Reason
-
-            # Reset colors before displaying table
-            $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
-
-            # Display the table
-            $policyTable | Format-Table -AutoSize | Out-Host
+            # Reset colors
+            Write-Host ""
 
             # Return the final result object for pipeline usage
             return $finalResult | Select-Object -Property AccessAllowed, BlockingPolicies, RequiredControls, SessionControls
