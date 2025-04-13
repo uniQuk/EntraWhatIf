@@ -539,7 +539,7 @@ function Test-DeviceStateInScope {
     return $true
 }
 
-function Test-DeviceFilter {
+function Evaluate-DeviceFilter {
     [CmdletBinding()]
     [OutputType([System.Boolean])]
     param (
@@ -582,14 +582,14 @@ function Test-DeviceFilter {
         }
 
         # Evaluate the condition
-        $filterMatches = $false
+        $matches = $false
         switch ($operator) {
-            "-eq" { $filterMatches = ($actualValue -eq $value) }
-            "-ne" { $filterMatches = ($actualValue -ne $value) }
-            default { $filterMatches = $false }
+            "-eq" { $matches = ($actualValue -eq $value) }
+            "-ne" { $matches = ($actualValue -ne $value) }
+            default { $matches = $false }
         }
 
-        return $filterMatches
+        return $matches
     }
 
     # Handle include/exclude filter mode for joinType
@@ -615,17 +615,17 @@ function Test-DeviceFilter {
                 }
 
                 # Check if the device join type matches any of the values
-                $filterMatches = $false
+                $matchesJoinType = $false
                 foreach ($value in $values) {
                     $mappedValue = $joinTypeMap[$value]
                     if ($mappedValue -and $Device.JoinType -eq $mappedValue) {
-                        $filterMatches = $true
+                        $matchesJoinType = $true
                         break
                     }
                 }
             }
             default {
-                $filterMatches = $false
+                $matchesJoinType = $false
             }
         }
 
@@ -633,10 +633,10 @@ function Test-DeviceFilter {
         $filterMode = if ($operator -eq "-in") { "include" } else { "exclude" }
 
         if ($filterMode -eq "include") {
-            return $filterMatches
+            return $matchesJoinType
         }
         elseif ($filterMode -eq "exclude") {
-            return -not $filterMatches
+            return -not $matchesJoinType
         }
     }
 

@@ -35,7 +35,7 @@ function Resolve-GroupMembership {
         [string[]]$GroupIds,
 
         [Parameter(Mandatory = $false)]
-        [switch]$IncludeNestedGroups
+        [switch]$IncludeNestedGroups = $true
     )
 
     try {
@@ -98,8 +98,7 @@ function Resolve-GroupMembership {
                     # Check if user is a member
                     $checkUrl = "/groups/{0}/{1}/{2}/`$ref" -f $groupId, $membershipType, $UserId
                     try {
-                        # Just check if the request succeeds, no need to store the result
-                        Invoke-MgGraphRequest -Method GET -Uri $checkUrl -ErrorAction Stop
+                        $checkResult = Invoke-MgGraphRequest -Method GET -Uri $checkUrl -ErrorAction Stop
                         $isMember = $true
                     }
                     catch {

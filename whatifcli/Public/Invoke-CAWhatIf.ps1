@@ -1,4 +1,4 @@
-﻿function Invoke-CAWhatIf {
+function Invoke-CAWhatIf {
     <#
     .SYNOPSIS
         Simulates the evaluation of Conditional Access policies for a given scenario.
@@ -142,7 +142,7 @@
         [string[]]$PolicyIds,
 
         [Parameter()]
-        [switch]$IncludeReportOnly,
+        [switch]$IncludeReportOnly = $true,
 
         # Output parameters
         [Parameter()]
@@ -159,11 +159,11 @@
         try {
             $graphConnection = Get-MgContext
             if (-not $graphConnection) {
-                Connect-MgGraph -Scopes 'Policy.Read.All', 'Directory.Read.All'
+                Connect-MgGraph -Scopes "Policy.Read.All", "Directory.Read.All"
             }
         }
         catch {
-            Write-Error 'Failed to connect to Microsoft Graph. Please ensure you have the necessary permissions.'
+            Write-Error "Failed to connect to Microsoft Graph. Please ensure you have the necessary permissions."
             return
         }
 
@@ -182,7 +182,7 @@
                 # Continue with what was provided
                 $UserGuid = $UserId
                 $UserPrincipalName = $UserId
-                $UserDisplayName = 'Unknown User'
+                $UserDisplayName = "Unknown User"
 
                 Write-Warning ("Could not resolve user identity for '{0}'. Using as-is." -f $UserId)
             }
@@ -191,7 +191,7 @@
             # Fall back to the provided ID
             $UserGuid = $UserId
             $UserPrincipalName = $UserId
-            $UserDisplayName = 'Unknown User'
+            $UserDisplayName = "Unknown User"
 
             Write-Warning ("Error resolving user identity: {0}" -f $_.Exception.Message)
         }
@@ -254,7 +254,7 @@
         $policies = Get-CAPolicy -PolicyIds $PolicyIds -IncludeReportOnly:$IncludeReportOnly
 
         if (-not $policies -or $policies.Count -eq 0) {
-            Write-Warning 'No Conditional Access policies found.'
+            Write-Warning "No Conditional Access policies found."
             return
         }
 
@@ -282,7 +282,7 @@
             }
 
             # Only evaluate enabled or report-only policies
-            if ($policy.State -eq 'enabled' -or ($policy.State -eq 'enabledForReportingButNotEnforced' -and $IncludeReportOnly) -or $policy.State -eq 'disabled') {
+            if ($policy.State -eq "enabled" -or ($policy.State -eq "enabledForReportingButNotEnforced" -and $IncludeReportOnly) -or $policy.State -eq "disabled") {
 
                 # --- CORE EVALUATION LOGIC (MOVED OUTSIDE DIAGNOSTIC BLOCK) ---
                 Write-Verbose "Evaluating policy: $($policy.DisplayName) (ID: $($policy.Id))" # General evaluation message
@@ -300,7 +300,7 @@
                     $result.GrantControlsRequired = $grantControlResult.GrantControlsRequired
 
                     # If access is granted or conditional, check session controls
-                    if ($result.AccessResult -eq 'Granted' -or $result.AccessResult -eq 'ConditionallyGranted') {
+                    if ($result.AccessResult -eq "Granted" -or $result.AccessResult -eq "ConditionallyGranted") {
                         $sessionControlResult = Resolve-CASessionControl -Policy $policy
                         $result.SessionControlsApplied = $sessionControlResult.SessionControlsApplied
                     }
@@ -338,7 +338,7 @@
                             }
 
                             # Validate if the excluded user is in GUID format
-                            $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+                            $guidPattern = "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"
                             $isGuid = $excludedUser -match $guidPattern
 
                             if ($isGuid) {
@@ -384,7 +384,7 @@
                             if ($includedGroupChecks.Success) {
                                 $memberOfAnyIncludedGroup = $false; $groupDetails = @()
                                 foreach ($group in $includedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { 'Member' } else { 'Not Member' }); if ($group.IsMember) { $memberOfAnyIncludedGroup = $true }
+                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyIncludedGroup = $true }
                                 }
                                 Write-Verbose ("User is member of included groups: {0}" -f $memberOfAnyIncludedGroup)
                                 Write-Verbose ("Included groups checks (resolved): {0}" -f ($groupDetails -join ", "))
@@ -400,7 +400,7 @@
                             if ($excludedGroupChecks.Success) {
                                 $memberOfAnyExcludedGroup = $false; $groupDetails = @()
                                 foreach ($group in $excludedGroupChecks.MemberOfSpecificGroups.Values) {
-                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { 'Member' } else { 'Not Member' }); if ($group.IsMember) { $memberOfAnyExcludedGroup = $true }
+                                    $groupDetails += "{0} ({1}): {2}" -f $group.DisplayName, $group.GroupId, $(if ($group.IsMember) { "Member" } else { "Not Member" }); if ($group.IsMember) { $memberOfAnyExcludedGroup = $true }
                                 }
                                 Write-Verbose ("User is member of excluded groups: {0}" -f $memberOfAnyExcludedGroup)
                                 Write-Verbose ("Excluded groups checks (resolved): {0}" -f ($groupDetails -join ", "))
@@ -458,14 +458,14 @@
         }
 
         # Check if any policy blocks access
-        $blockingPolicies = $applicablePolicies | Where-Object { $_.AccessResult -eq 'Blocked' }
+        $blockingPolicies = $applicablePolicies | Where-Object { $_.AccessResult -eq "Blocked" }
         if ($blockingPolicies.Count -gt 0) {
             $finalResult.AccessAllowed = $false
             $finalResult.BlockingPolicies = $blockingPolicies
         }
 
         # Collect all required controls from applicable policies
-        $conditionalPolicies = $applicablePolicies | Where-Object { $_.AccessResult -eq 'ConditionallyGranted' }
+        $conditionalPolicies = $applicablePolicies | Where-Object { $_.AccessResult -eq "ConditionallyGranted" }
         foreach ($policy in $conditionalPolicies) {
             $finalResult.RequiredControls += $policy.GrantControlsRequired | Where-Object { $_ -notin $finalResult.RequiredControls }
         }
@@ -477,13 +477,9 @@
 
         # Return appropriate level of detail
         if ($OutputLevel -eq 'Table') {
-            # Set InformationPreference to continue to ensure messages are displayed
-            $currentInformationPreference = $InformationPreference
-            $InformationPreference = 'Continue'
-
             # Display formatted table in console
-            Write-Information "Conditional Access WhatIf Results for User: $UserId" -InformationAction Continue -ForegroundColor Cyan
-            Write-Information "===============================================================" -InformationAction Continue -ForegroundColor Cyan
+            Write-Host "Conditional Access WhatIf Results for User: $UserId" -ForegroundColor Cyan
+            Write-Host "===============================================================" -ForegroundColor Cyan
 
             # Show input parameters
             $paramSummary = "Parameters:"
@@ -493,85 +489,88 @@
             if ($IpAddress) { $paramSummary += " IP=$IpAddress" }
             if ($DeviceCompliant -ne $false) { $paramSummary += " Compliant=$DeviceCompliant" }
             if ($MfaAuthenticated -ne $false) { $paramSummary += " MFA=$MfaAuthenticated" }
-            Write-Information $paramSummary -InformationAction Continue -ForegroundColor Yellow
-            Write-Information "" -InformationAction Continue
+            Write-Host $paramSummary -ForegroundColor Yellow
+            Write-Host ""
 
             # Summary header
             $accessStatus = if ($finalResult.AccessAllowed) { "GRANTED" } else { "BLOCKED" }
             $accessColor = if ($finalResult.AccessAllowed) { "Green" } else { "Red" }
-            Write-Information "Access Status: $accessStatus" -InformationAction Continue -ForegroundColor $accessColor
+            Write-Host "Access Status: " -NoNewline
+            Write-Host $accessStatus -ForegroundColor $accessColor
 
             if ($finalResult.RequiredControls.Count -gt 0) {
-                Write-Information "Required Controls: $($finalResult.RequiredControls -join ", ")" -InformationAction Continue -ForegroundColor Yellow
+                Write-Host "Required Controls: " -NoNewline
+                Write-Host ($finalResult.RequiredControls -join ", ") -ForegroundColor Yellow
             }
 
             if ($finalResult.SessionControls.Count -gt 0) {
-                Write-Information "Session Controls: $($finalResult.SessionControls -join ", ")" -InformationAction Continue -ForegroundColor Cyan
+                Write-Host "Session Controls: " -NoNewline
+                Write-Host ($finalResult.SessionControls -join ", ") -ForegroundColor Cyan
             }
 
             # Policy count information
-            $enabledCount = ($results | Where-Object { $_.State -eq 'enabled' }).Count
-            $reportOnlyCount = ($results | Where-Object { $_.State -eq 'enabledForReportingButNotEnforced' }).Count
-            $disabledCount = ($results | Where-Object { $_.State -eq 'disabled' }).Count
+            $enabledCount = ($results | Where-Object { $_.State -eq "enabled" }).Count
+            $reportOnlyCount = ($results | Where-Object { $_.State -eq "enabledForReportingButNotEnforced" }).Count
+            $disabledCount = ($results | Where-Object { $_.State -eq "disabled" }).Count
             $totalCount = $results.Count
             $applicableCount = ($results | Where-Object { $_.Applies -eq $true }).Count
 
-            Write-Information "`nPolicy Counts:" -InformationAction Continue -ForegroundColor Cyan
-            Write-Information "Total Policies: $totalCount (Enabled: $enabledCount, Report-Only: $reportOnlyCount, Disabled: $disabledCount)" -InformationAction Continue -ForegroundColor White
-            Write-Information "Applicable to this scenario: $applicableCount" -InformationAction Continue -ForegroundColor White
-            # Write-Information "`nNote: Only enabled policies affect the final access decision." -InformationAction Continue -ForegroundColor Yellow # Commented out as all applicable policies are now considered
+            Write-Host "`nPolicy Counts:" -ForegroundColor Cyan
+            Write-Host "Total Policies: $totalCount (Enabled: $enabledCount, Report-Only: $reportOnlyCount, Disabled: $disabledCount)" -ForegroundColor White
+            Write-Host "Applicable to this scenario: $applicableCount" -ForegroundColor White
+            # Write-Host "`nNote: Only enabled policies affect the final access decision." -ForegroundColor Yellow # Commented out as all applicable policies are now considered
 
-            Write-Information "`nPolicy Evaluation Details:" -InformationAction Continue -ForegroundColor Cyan
-            Write-Information "===============================================================" -InformationAction Continue -ForegroundColor Cyan
+            Write-Host "`nPolicy Evaluation Details:" -ForegroundColor Cyan
+            Write-Host "===============================================================" -ForegroundColor Cyan
 
             # Create formatted table for each policy result
             $policyTable = @()
             foreach ($result in $results) {
                 # Prepare colored output strings
                 $appliesDisplay = if ($result.Applies) {
-                    $Host.UI.RawUI.ForegroundColor = 'Green'
-                    'YES'
+                    $Host.UI.RawUI.ForegroundColor = "Green"
+                    "YES"
                 }
                 else {
-                    $Host.UI.RawUI.ForegroundColor = 'DarkGray'
-                    'NO'
+                    $Host.UI.RawUI.ForegroundColor = "DarkGray"
+                    "NO"
                 }
                 $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
                 $stateDisplay = switch ($result.State) {
-                    'enabled' {
-                        $Host.UI.RawUI.ForegroundColor = 'Green'
-                        'Enabled'
+                    "enabled" {
+                        $Host.UI.RawUI.ForegroundColor = "Green"
+                        "Enabled"
                     }
-                    'enabledForReportingButNotEnforced' {
-                        $Host.UI.RawUI.ForegroundColor = 'Yellow'
-                        'Report'
+                    "enabledForReportingButNotEnforced" {
+                        $Host.UI.RawUI.ForegroundColor = "Yellow"
+                        "Report-Only"
                     }
-                    'disabled' {
-                        $Host.UI.RawUI.ForegroundColor = 'DarkGray'
-                        'Disabled'
+                    "disabled" {
+                        $Host.UI.RawUI.ForegroundColor = "DarkGray"
+                        "Disabled"
                     }
                     default {
-                        $Host.UI.RawUI.ForegroundColor = 'DarkGray'
-                        'Disabled'
+                        $Host.UI.RawUI.ForegroundColor = "DarkGray"
+                        "Disabled"
                     }
                 }
                 $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
                 $resultDisplay = switch ($result.AccessResult) {
-                    'Blocked' {
-                        $Host.UI.RawUI.ForegroundColor = 'Red'
-                        'BLOCKED'
+                    "Blocked" {
+                        $Host.UI.RawUI.ForegroundColor = "Red"
+                        "BLOCKED"
                     }
-                    'Granted' {
-                        $Host.UI.RawUI.ForegroundColor = 'Green'
-                        'GRANTED'
+                    "Granted" {
+                        $Host.UI.RawUI.ForegroundColor = "Green"
+                        "GRANTED"
                     }
-                    'ConditionallyGranted' {
-                        $Host.UI.RawUI.ForegroundColor = 'Yellow'
-                        'CONDITIONAL'
+                    "ConditionallyGranted" {
+                        $Host.UI.RawUI.ForegroundColor = "Yellow"
+                        "CONDITIONAL"
                     }
-                    default { '-' }
+                    default { "-" }
                 }
                 $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
@@ -580,12 +579,12 @@
                     PolicyName       = $result.DisplayName
                     State            = $stateDisplay
                     Applies          = $appliesDisplay
-                    "User"           = if ($result.EvaluationDetails.UserInScope) { '✓' } else { '✗' }
-                    "App"            = if ($result.EvaluationDetails.ResourceInScope) { '✓' } else { '✗' }
-                    "Platform"       = if ($result.EvaluationDetails.DevicePlatformInScope) { '✓' } else { '✗' }
-                    "Network"        = if ($result.EvaluationDetails.NetworkInScope) { '✓' } else { '✗' }
+                    "User"           = if ($result.EvaluationDetails.UserInScope) { "✓" } else { "✗" }
+                    "App"            = if ($result.EvaluationDetails.ResourceInScope) { "✓" } else { "✗" }
+                    "Platform"       = if ($result.EvaluationDetails.DevicePlatformInScope) { "✓" } else { "✗" }
+                    "Network"        = if ($result.EvaluationDetails.NetworkInScope) { "✓" } else { "✗" }
                     Result           = $resultDisplay
-                    Controls         = if ($result.Applies) { ($result.GrantControlsRequired -join ', ') } else { '' }
+                    Controls         = if ($result.Applies) { ($result.GrantControlsRequired -join ", ") } else { "" }
                     Reason           = if (-not $result.Applies) {
                         if (-not $result.EvaluationDetails.UserInScope) {
                             # Use the detailed reason from evaluation if available
@@ -593,23 +592,23 @@
                                 $result.EvaluationDetails.Reasons.User
                             }
                             else {
-                                'User not in scope'
+                                "User not in scope"
                             }
                         }
-                        elseif (-not $result.EvaluationDetails.ResourceInScope) { 'App not in scope' }
-                        elseif (-not $result.EvaluationDetails.DevicePlatformInScope) { 'Platform not in scope' }
-                        elseif (-not $result.EvaluationDetails.NetworkInScope) { 'Network not in scope' }
-                        elseif (-not $result.EvaluationDetails.DeviceStateInScope) { 'Device state not in scope' }
-                        elseif (-not $result.EvaluationDetails.RiskLevelsInScope) { 'Risk level not in scope' }
-                        else { 'Not applicable' }
+                        elseif (-not $result.EvaluationDetails.ResourceInScope) { "App not in scope" }
+                        elseif (-not $result.EvaluationDetails.DevicePlatformInScope) { "Platform not in scope" }
+                        elseif (-not $result.EvaluationDetails.NetworkInScope) { "Network not in scope" }
+                        elseif (-not $result.EvaluationDetails.DeviceStateInScope) { "Device state not in scope" }
+                        elseif (-not $result.EvaluationDetails.RiskLevelsInScope) { "Risk level not in scope" }
+                        else { "Not applicable" }
                     }
-                    else { '' }
+                    else { "" }
                     # Add ordering properties for sorting
                     AppliesSortOrder = if ($result.Applies) { 1 } else { 2 }
                     StateSortOrder   = switch ($result.State) {
-                        'enabled' { 1 }
-                        'enabledForReportingButNotEnforced' { 2 }
-                        'disabled' { 3 }
+                        "enabled" { 1 }
+                        "enabledForReportingButNotEnforced" { 2 }
+                        "disabled" { 3 }
                         default { 4 }
                     }
                 }
@@ -619,14 +618,11 @@
             # Sort the table: applicable policies first, then by state (enabled, report-only, disabled)
             $policyTable = $policyTable | Sort-Object -Property AppliesSortOrder, StateSortOrder | Select-Object -Property PolicyName, State, Applies, User, App, Platform, Network, Result, Controls, Reason
 
-            # Reset colors before displaying table - Commenting this out as Format-Table might lose colors anyway
+            # Reset colors before displaying table
             $Host.UI.RawUI.ForegroundColor = $Host.UI.RawUI.BackgroundColor
 
             # Display the table
             $policyTable | Format-Table -AutoSize | Out-Host
-
-            # Restore the original InformationPreference
-            $InformationPreference = $currentInformationPreference
 
             # Return the final result object for pipeline usage
             return $finalResult | Select-Object -Property AccessAllowed, BlockingPolicies, RequiredControls, SessionControls
