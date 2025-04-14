@@ -101,6 +101,9 @@ function Invoke-CAWhatIf {
     .PARAMETER DiagnosticLogPath
         The path to save diagnostic logs for the detailed output.
 
+    .PARAMETER IsGuestUser
+        Whether the user is a guest user.
+
     .EXAMPLE
         Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -DevicePlatform "Windows"
 
@@ -139,6 +142,12 @@ function Invoke-CAWhatIf {
         [Parameter(ParameterSetName = "ServicePrincipal")]
         [ValidateSet('None', 'Low', 'Medium', 'High')]
         [string]$UserRiskLevel = 'None',
+
+        [Parameter(ParameterSetName = "User")]
+        [Parameter(ParameterSetName = "Application")]
+        [Parameter(ParameterSetName = "UserAction")]
+        [Parameter(ParameterSetName = "ServicePrincipal")]
+        [bool]$IsGuestUser = $false,
 
         # Resource parameters
         [Parameter(Mandatory = $true, ParameterSetName = "Application")]
