@@ -84,14 +84,14 @@ function Get-OptimizedGroupMembership {
             if ($entityType -eq "user") {
                 # Use transitive member of to get all groups (direct and nested)
                 try {
-                    $baseUri = "/users/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    $baseUri = "/v1.0/users/$entityId/transitiveMemberOf?`$select=id,displayName,description"
                     $nextLink = $baseUri
 
                     # Handle pagination to get ALL groups
                     $pageCount = 0
                     do {
                         Write-Verbose "Requesting group membership from Graph API: $nextLink"
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Requesting page $($pageCount+1) of group memberships for $entityType $entityId" -Level "Info"
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Requesting page $($pageCount+1) of group memberships for $entityType {$entityId}" -Level "Info"
                         $response = Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
                         $pageCount++
 
@@ -144,7 +144,7 @@ function Get-OptimizedGroupMembership {
             else {
                 # For service principals
                 try {
-                    $baseUri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    $baseUri = "/v1.0/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
                     $nextLink = $baseUri
 
                     # Handle pagination to get ALL groups
