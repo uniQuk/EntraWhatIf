@@ -64,6 +64,7 @@ function Resolve-UserIdentity {
                 DisplayName       = $user.DisplayName
                 JobTitle          = $user.JobTitle
                 Department        = $user.Department
+                UserType          = $user.UserType
                 Success           = $true
             }
         }
@@ -75,6 +76,7 @@ function Resolve-UserIdentity {
                 UserPrincipalName = $UserIdOrUpn
                 UpnLower          = $UserIdOrUpn.ToLower()
                 DisplayName       = "Unknown User"
+                UserType          = "Member" # Default to Member if user is not found
                 Success           = $false
             }
         }
@@ -87,6 +89,7 @@ function Resolve-UserIdentity {
             UserPrincipalName = $UserIdOrUpn
             UpnLower          = $UserIdOrUpn.ToLower()
             DisplayName       = "Unknown User"
+            UserType          = "Member" # Default to Member on errors
             Success           = $false
             Error             = $_.Exception.Message
         }

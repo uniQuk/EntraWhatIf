@@ -462,14 +462,71 @@ function Test-UserExclusions {
 
     # Check for guest or external user exclusion
     if (Test-SpecialValue -Collection $Policy.Conditions.Users.ExcludeUsers -ValueType "GuestsOrExternalUsers") {
-        # Check if user is a guest (implementation depends on how you determine guest status)
-        $isGuest = $UserContext.UserType -eq "Guest" -or $UserContext.UPN -match "#EXT#"
+        # Enhanced guest detection logic
+        $isGuest = $false
+
+        # Check standard indicators of guest status
+        if ($UserContext.UserType -eq "Guest") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UserType property"
+        }
+        elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
+        }
+        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
+            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
+            $isGuest = $true
+            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
+        }
+        # Add more guest detection checks here as needed
 
         if ($isGuest) {
+            Write-Verbose "User is a guest or external user - excluded by GuestsOrExternalUsers special value"
             $result.Excluded = $true
             $result.Reason = "User is excluded as guest or external user"
             return $result
         }
+
+        Write-Verbose "GuestsOrExternalUsers exclusion found, but user is not a guest ($($UserContext.UPN))"
+    }
+
+    # Check for excludeGuestsOrExternalUsers object (new method used in Microsoft Graph)
+    if ($Policy.Conditions.Users.excludeGuestsOrExternalUsers) {
+        Write-Verbose "Policy excludes guests/external users (via excludeGuestsOrExternalUsers object)"
+
+        # Enhanced guest detection logic
+        $isGuest = $false
+
+        # Check standard indicators of guest status
+        if ($UserContext.UserType -eq "Guest") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UserType property"
+        }
+        elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
+        }
+        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
+            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
+            $isGuest = $true
+            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
+        }
+
+        # Log the specific guest types configured in the policy
+        if ($Policy.Conditions.Users.excludeGuestsOrExternalUsers.guestOrExternalUserTypes) {
+            Write-Verbose "Policy excludes these guest types: $($Policy.Conditions.Users.excludeGuestsOrExternalUsers.guestOrExternalUserTypes)"
+        }
+
+        if ($isGuest) {
+            Write-Verbose "User is a guest or external user - excluded by excludeGuestsOrExternalUsers condition"
+            $result.Excluded = $true
+            $result.Reason = "User is excluded as guest or external user"
+            return $result
+        }
+
+        # If user is not a guest, the exclusion doesn't apply
+        Write-Verbose "Policy excludes guests/external users, but user ($($UserContext.UPN)) is not a guest - exclusion doesn't apply"
     }
 
     return $result
@@ -559,14 +616,74 @@ function Test-UserInclusions {
 
     # Check for guest or external user inclusion
     if (Test-SpecialValue -Collection $Policy.Conditions.Users.IncludeUsers -ValueType "GuestsOrExternalUsers") {
-        # Check if user is a guest (implementation depends on how you determine guest status)
-        $isGuest = $UserContext.UserType -eq "Guest" -or $UserContext.UPN -match "#EXT#"
+        # Enhanced guest detection logic
+        $isGuest = $false
+
+        # Check standard indicators of guest status
+        if ($UserContext.UserType -eq "Guest") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UserType property"
+        }
+        elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
+        }
+        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
+            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
+            $isGuest = $true
+            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
+        }
+        # Add more guest detection checks here as needed
 
         if ($isGuest) {
+            Write-Verbose "User is a guest or external user - included by GuestsOrExternalUsers special value"
             $result.Included = $true
             $result.Reason = "User is included as guest or external user"
             return $result
         }
+
+        Write-Verbose "GuestsOrExternalUsers inclusion found, but user is not a guest ($($UserContext.UPN))"
+    }
+
+    # Check for includeGuestsOrExternalUsers object (new method used in Microsoft Graph)
+    if ($Policy.Conditions.Users.includeGuestsOrExternalUsers) {
+        Write-Verbose "Policy includes guests/external users (via includeGuestsOrExternalUsers object)"
+
+        # Enhanced guest detection logic
+        $isGuest = $false
+
+        # Check standard indicators of guest status
+        if ($UserContext.UserType -eq "Guest") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UserType property"
+        }
+        elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
+            $isGuest = $true
+            Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
+        }
+        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
+            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
+            $isGuest = $true
+            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
+        }
+
+        # Log the specific guest types configured in the policy
+        if ($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes) {
+            Write-Verbose "Policy targets these guest types: $($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes)"
+        }
+
+        if ($isGuest) {
+            Write-Verbose "User is a guest or external user - included by includeGuestsOrExternalUsers condition"
+            $result.Included = $true
+            $result.Reason = "User is included as guest or external user"
+            return $result
+        }
+
+        # If policy specifically targets guests, and user is not a guest, they don't match
+        Write-Verbose "Policy targets guests/external users, but user ($($UserContext.UPN)) is not a guest"
+        $result.Included = $false
+        $result.Reason = "Policy targets guests, but user is not a guest/external user"
+        return $result
     }
 
     # If we got this far, check if there's any inclusion criteria at all

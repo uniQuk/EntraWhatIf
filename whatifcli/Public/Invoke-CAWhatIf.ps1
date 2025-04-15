@@ -325,21 +325,22 @@ function Invoke-CAWhatIf {
                     Write-Verbose ("Resolved service principal '{0}' to: {1} ({2})" -f $ServicePrincipalId, $spDisplayName, $spId)
                 }
                 else {
-                    # Continue with what was provided
-                    $spId = $ServicePrincipalId
-                    $spAppId = $ServicePrincipalId
-                    $spDisplayName = $ServicePrincipalDisplayName ?? "Unknown Service Principal"
+                    # Exit gracefully if service principal can't be found - show only one error message
+                    $errorMsg = "Service Principal '$ServicePrincipalId' could not be found in Microsoft Entra ID. Please check the service principal ID or application ID and try again."
+                    if ($resolvedServicePrincipal.Error) {
+                        $errorMsg += " Details: $($resolvedServicePrincipal.Error)"
+                    }
 
-                    Write-Warning ("Could not resolve service principal identity for '{0}'. Using as-is." -f $ServicePrincipalId)
+                    # Use Write-Error with -ErrorAction Stop to exit completely with a clean error
+                    Write-Error $errorMsg -ErrorAction Stop
+                    return
                 }
             }
             catch {
-                # Fall back to the provided ID
-                $spId = $ServicePrincipalId
-                $spAppId = $ServicePrincipalId
-                $spDisplayName = $ServicePrincipalDisplayName ?? "Unknown Service Principal"
-
-                Write-Warning ("Error resolving service principal identity: {0}" -f $_.Exception.Message)
+                # Exit with error - single message approach
+                $errorMsg = "Failed to resolve service principal identity for '$ServicePrincipalId'. Details: $($_.Exception.Message)"
+                Write-Error $errorMsg -ErrorAction Stop
+                return
             }
 
             # Create service principal context object
@@ -363,21 +364,22 @@ function Invoke-CAWhatIf {
                     Write-Verbose ("Resolved user '{0}' to: {1} ({2})" -f $UserId, $UserDisplayName, $UserGuid)
                 }
                 else {
-                    # Continue with what was provided
-                    $UserGuid = $UserId
-                    $UserPrincipalName = $UserId
-                    $UserDisplayName = "Unknown User"
+                    # Exit gracefully if user can't be found - show only one error message
+                    $errorMsg = "User '$UserId' could not be found in Microsoft Entra ID. Please check the user ID or UPN and try again."
+                    if ($resolvedUser.Error) {
+                        $errorMsg += " Details: $($resolvedUser.Error)"
+                    }
 
-                    Write-Warning ("Could not resolve user identity for '{0}'. Using as-is." -f $UserId)
+                    # Use Write-Error with -ErrorAction Stop to exit completely with a clean error
+                    Write-Error $errorMsg -ErrorAction Stop
+                    return
                 }
             }
             catch {
-                # Fall back to the provided ID
-                $UserGuid = $UserId
-                $UserPrincipalName = $UserId
-                $UserDisplayName = "Unknown User"
-
-                Write-Warning ("Error resolving user identity: {0}" -f $_.Exception.Message)
+                # Exit with error - single message approach
+                $errorMsg = "Failed to resolve user identity for '$UserId'. Details: $($_.Exception.Message)"
+                Write-Error $errorMsg -ErrorAction Stop
+                return
             }
 
             # If no groups were provided, but we have a valid user ID, get the user's groups
@@ -455,6 +457,29 @@ function Invoke-CAWhatIf {
                 UserRiskLevel      = $UserRiskLevel
                 MfaAuthenticated   = $MfaAuthenticated
                 IsServicePrincipal = $false
+            }
+
+            # Add UserType to the context for guest/member determination
+            if ($resolvedUser.Success) {
+                # If the user was found via Graph API, get their user type from the resolved user
+                $UserContext.UserType = $resolvedUser.UserType
+                Write-Verbose "User type set to: $($resolvedUser.UserType)"
+            }
+            else {
+                # When user cannot be resolved, set default to Member
+                $UserContext.UserType = "Member"
+                Write-Verbose "User type defaulted to Member because user could not be resolved"
+            }
+
+            # Additional guest detection logic using email patterns
+            if (-not $UserContext.UserType -or $UserContext.UserType -eq "") {
+                $UserContext.UserType = "Member"
+
+                # If the UPN matches common guest patterns, mark as Guest
+                if ($UserPrincipalName -match "#EXT#" -or $UserPrincipalName -match "^.*_.*#EXT#@.*\.onmicrosoft\.com$") {
+                    $UserContext.UserType = "Guest"
+                    Write-Verbose "User type set to Guest based on UPN pattern"
+                }
             }
 
             # Special handling for known user with group membership issues
@@ -603,6 +628,13 @@ function Invoke-CAWhatIf {
     }
 
     process {
+        # Check if we have a valid user context before proceeding
+        if ($null -eq $UserContext) {
+            # This means there was an error in user resolution that wasn't properly caught
+            # We already should have displayed an error, so just exit silently
+            return
+        }
+
         # Load policies
         $policies = Get-CAPolicy -PolicyIds $PolicyIds -IncludeReportOnly:$IncludeReportOnly
 
