@@ -7,32 +7,32 @@
     ModuleVersion     = '0.1.0'
 
     # ID used to uniquely identify this module
-    GUID              = 'bc7e6e65-1b79-4e0e-aea1-e6c6d21c5a22'
+    GUID              = '52f62b7a-8d7d-4f81-a260-72b2beee77af'
 
     # Author of this module
-    Author            = 'WhatIf CA Team'
+    Author            = 'Josh - https://github.com/uniQuk'
 
     # Company or vendor of this module
-    CompanyName       = 'WhatIf CA'
+    CompanyName       = 'North7'
 
     # Copyright statement for this module
-    Copyright         = '(c) 2025 WhatIf CA. All rights reserved.'
+    Copyright         = 'MIT License (c) 2025 Josh'
 
     # Description of the functionality provided by this module
     Description       = 'A module to simulate Microsoft Entra Conditional Access policy evaluation for hypothetical sign-in scenarios.'
 
     # Minimum version of the PowerShell engine required by this module
-    PowerShellVersion = '5.1'
+    PowerShellVersion = '7.0.0'
 
     # Modules that must be imported into the global environment prior to importing this module
     RequiredModules   = @(
         @{
             ModuleName    = 'Microsoft.Graph.Authentication'
-            ModuleVersion = '1.19.0'
+            ModuleVersion = '2.26.0'
         },
         @{
             ModuleName    = 'Microsoft.Graph.Identity.SignIns'
-            ModuleVersion = '1.19.0'
+            ModuleVersion = '2.26.0'
         }
     )
 
@@ -60,13 +60,10 @@
             Tags         = @('EntraID', 'AzureAD', 'ConditionalAccess', 'WhatIf', 'Security')
 
             # A URL to the license for this module.
-            LicenseUri   = ''
+            LicenseUri   = 'https://github.com/uniQuk/EntraWhatIf/blob/main/LICENSE'
 
             # A URL to the main website for this project.
-            ProjectUri   = ''
-
-            # A URL to an icon representing this module.
-            # IconUri = ''
+            ProjectUri   = 'https://github.com/uniQuk/EntraWhatIf'
 
             # ReleaseNotes of this module
             ReleaseNotes = 'Initial release of the WhatIfCA module.'
