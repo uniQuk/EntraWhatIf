@@ -465,21 +465,17 @@ function Test-UserExclusions {
         # Enhanced guest detection logic
         $isGuest = $false
 
-        # Check standard indicators of guest status
+        # Primary check: UserType property is the most reliable indicator
         if ($UserContext.UserType -eq "Guest") {
             $isGuest = $true
-            Write-Verbose "User identified as guest by UserType property"
+            Write-Verbose "User identified as guest by UserType property (primary indicator)"
         }
+        # Secondary check: #EXT# pattern in UPN is a reliable indicator for B2B collaboration guests
         elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
             $isGuest = $true
             Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
         }
-        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
-            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
-            $isGuest = $true
-            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
-        }
-        # Add more guest detection checks here as needed
+        # Note: Removed the .onmicrosoft.com check as it incorrectly identifies Member accounts as guests
 
         if ($isGuest) {
             Write-Verbose "User is a guest or external user - excluded by GuestsOrExternalUsers special value"
@@ -495,27 +491,25 @@ function Test-UserExclusions {
     if ($Policy.Conditions.Users.excludeGuestsOrExternalUsers) {
         Write-Verbose "Policy excludes guests/external users (via excludeGuestsOrExternalUsers object)"
 
-        # Enhanced guest detection logic
+        # Simplified guest detection logic
         $isGuest = $false
 
-        # Check standard indicators of guest status
+        # Primary check: UserType property is the most reliable indicator
         if ($UserContext.UserType -eq "Guest") {
             $isGuest = $true
-            Write-Verbose "User identified as guest by UserType property"
+            Write-Verbose "User identified as guest by UserType property (primary indicator)"
         }
+        # Secondary check: #EXT# pattern in UPN is a reliable indicator for B2B collaboration guests
         elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
             $isGuest = $true
             Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
         }
-        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
-            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
-            $isGuest = $true
-            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
-        }
+        # Note: Removed the .onmicrosoft.com check as it incorrectly identifies Member accounts as guests
 
         # Log the specific guest types configured in the policy
         if ($Policy.Conditions.Users.excludeGuestsOrExternalUsers.guestOrExternalUserTypes) {
             Write-Verbose "Policy excludes these guest types: $($Policy.Conditions.Users.excludeGuestsOrExternalUsers.guestOrExternalUserTypes)"
+            # For simplified approach, we're treating all guest types the same if UserType="Guest"
         }
 
         if ($isGuest) {
@@ -616,60 +610,64 @@ function Test-UserInclusions {
 
     # Check for guest or external user inclusion
     if (Test-SpecialValue -Collection $Policy.Conditions.Users.IncludeUsers -ValueType "GuestsOrExternalUsers") {
-        # Enhanced guest detection logic
+        # Simplified guest detection logic
         $isGuest = $false
 
-        # Check standard indicators of guest status
+        # Primary check: UserType property is the most reliable indicator
         if ($UserContext.UserType -eq "Guest") {
             $isGuest = $true
-            Write-Verbose "User identified as guest by UserType property"
+            Write-Verbose "User identified as guest by UserType property (primary indicator)"
         }
+        # Secondary check: #EXT# pattern in UPN is a reliable indicator for B2B collaboration guests
         elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
             $isGuest = $true
             Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
         }
-        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
-            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
-            $isGuest = $true
-            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
+        # Note: Removed the .onmicrosoft.com check as it incorrectly identifies Member accounts as guests
+
+        # Log the specific guest types configured in the policy
+        if ($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes) {
+            Write-Verbose "Policy targets these guest types: $($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes)"
+            # For simplified approach, we're treating all guest types the same if UserType="Guest"
         }
-        # Add more guest detection checks here as needed
 
         if ($isGuest) {
-            Write-Verbose "User is a guest or external user - included by GuestsOrExternalUsers special value"
+            Write-Verbose "User is a guest or external user - included by includeGuestsOrExternalUsers condition"
             $result.Included = $true
             $result.Reason = "User is included as guest or external user"
             return $result
         }
 
-        Write-Verbose "GuestsOrExternalUsers inclusion found, but user is not a guest ($($UserContext.UPN))"
+        # If policy specifically targets guests, and user is not a guest, they don't match
+        Write-Verbose "Policy targets guests/external users, but user ($($UserContext.UPN)) is not a guest"
+        $result.Included = $false
+        $result.Reason = "Policy targets guests, but user is not a guest/external user"
+        return $result
     }
 
     # Check for includeGuestsOrExternalUsers object (new method used in Microsoft Graph)
     if ($Policy.Conditions.Users.includeGuestsOrExternalUsers) {
         Write-Verbose "Policy includes guests/external users (via includeGuestsOrExternalUsers object)"
 
-        # Enhanced guest detection logic
+        # Simplified guest detection logic
         $isGuest = $false
 
-        # Check standard indicators of guest status
+        # Primary check: UserType property is the most reliable indicator
         if ($UserContext.UserType -eq "Guest") {
             $isGuest = $true
-            Write-Verbose "User identified as guest by UserType property"
+            Write-Verbose "User identified as guest by UserType property (primary indicator)"
         }
+        # Secondary check: #EXT# pattern in UPN is a reliable indicator for B2B collaboration guests
         elseif ($UserContext.UPN -match "#EXT#" -or $UserContext.UPN -match "^[^@]+_[^@]+#EXT#@") {
             $isGuest = $true
             Write-Verbose "User identified as guest by UPN pattern (#EXT#)"
         }
-        elseif ($UserContext.UPN -match "\.onmicrosoft\.com$" -and $UserContext.UPN -notmatch "^admin@") {
-            # Users with UPNs in .onmicrosoft.com domain are often guests (except admin accounts)
-            $isGuest = $true
-            Write-Verbose "User identified as likely guest by .onmicrosoft.com UPN"
-        }
+        # Note: Removed the .onmicrosoft.com check as it incorrectly identifies Member accounts as guests
 
         # Log the specific guest types configured in the policy
         if ($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes) {
             Write-Verbose "Policy targets these guest types: $($Policy.Conditions.Users.includeGuestsOrExternalUsers.guestOrExternalUserTypes)"
+            # For simplified approach, we're treating all guest types the same if UserType="Guest"
         }
 
         if ($isGuest) {
