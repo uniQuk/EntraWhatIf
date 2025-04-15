@@ -105,6 +105,9 @@ function Resolve-CAGrantControl {
         else {
             $requiredControls += $controlResult.DisplayName
         }
+
+        # Debug verbose output to help troubleshoot
+        Write-Verbose "Control: $control - Display Name: $($controlResult.DisplayName) - Satisfied: $($controlResult.Satisfied)"
     }
 
     # Determine access result based on operator with unified logic
@@ -118,6 +121,7 @@ function Resolve-CAGrantControl {
     }
 
     if ($accessGranted) {
+        Write-Verbose "Access granted. All required controls satisfied."
         return @{
             AccessResult      = "Granted"
             Reason            = "All required controls satisfied"
@@ -126,6 +130,14 @@ function Resolve-CAGrantControl {
         }
     }
     else {
+        # For conditional access, make sure we have at least one default control if none specified
+        if ($requiredControls.Count -eq 0) {
+            $requiredControls = @("mfa") # Default to MFA as required control if nothing else specified
+            Write-Verbose "No specific required controls found, defaulting to MFA requirement"
+        }
+
+        Write-Verbose "Access conditionally granted. Required controls: $($requiredControls -join ', ')"
+
         return @{
             AccessResult      = "ConditionallyGranted"
             Reason            = if ($operator -eq "OR") { "At least one control must be satisfied" } else { "All controls must be satisfied" }
@@ -149,33 +161,35 @@ function Test-GrantControl {
         [object]$DeviceContext
     )
 
+    Write-Verbose "Testing grant control: $Control"
+
     $controlMap = @{
         "mfa"                  = @{
-            DisplayName  = "Multi-factor authentication"
+            DisplayName  = "mfa"
             TestProperty = { param($u, $d) $u.MfaAuthenticated }
         }
         "compliantDevice"      = @{
-            DisplayName  = "Compliant device"
+            DisplayName  = "compliantDevice"
             TestProperty = { param($u, $d) $d.Compliance }
         }
         "domainJoinedDevice"   = @{
-            DisplayName  = "Hybrid Azure AD joined device"
+            DisplayName  = "domainJoinedDevice"
             TestProperty = { param($u, $d) $d.JoinType -eq "Hybrid" }
         }
         "approvedApplication"  = @{
-            DisplayName  = "Approved client app"
+            DisplayName  = "approvedApplication"
             TestProperty = { param($u, $d) $d.ApprovedApplication }
         }
         "compliantApplication" = @{
-            DisplayName  = "App protection policy"
+            DisplayName  = "appProtectionPolicy"
             TestProperty = { param($u, $d) $d.AppProtectionPolicy }
         }
         "passwordChange"       = @{
-            DisplayName  = "Password change"
+            DisplayName  = "passwordChange"
             TestProperty = { param($u, $d) $false } # For simulation, always require password change if specified
         }
         "terms"                = @{
-            DisplayName  = "Terms of use"
+            DisplayName  = "terms"
             TestProperty = { param($u, $d) $false } # For simulation, always require terms if specified
         }
     }

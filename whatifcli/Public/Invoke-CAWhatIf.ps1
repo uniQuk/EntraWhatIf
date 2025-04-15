@@ -868,7 +868,7 @@ function Invoke-CAWhatIf {
             $appliesWidth = 10
             $conditionsWidth = 25
             $resultWidth = 12
-            $reasonWidth = 30
+            $reasonWidth = 50
 
             # Write table header
             Write-Host ("{0,-$nameWidth} {1,-$stateWidth} {2,-$appliesWidth} {3,-$conditionsWidth} {4,-$resultWidth} {5,-$reasonWidth}" -f
@@ -932,7 +932,51 @@ function Invoke-CAWhatIf {
                     else { "Not applicable" }
                 }
                 else {
-                    ($result.GrantControlsRequired -join ", ")
+                    # Show different text based on result
+                    if ($result.AccessResult -eq "Blocked") {
+                        "Access blocked"
+                    }
+                    elseif ($result.AccessResult -eq "ConditionallyGranted") {
+                        # For conditional access, show the controls if available
+                        if ($result.GrantControlsRequired -and $result.GrantControlsRequired.Count -gt 0) {
+                            $controls = "Requires: $($result.GrantControlsRequired -join ', ')"
+
+                            if ($result.SessionControlsApplied -and $result.SessionControlsApplied.Count -gt 0) {
+                                $controls += "; Session: $($result.SessionControlsApplied -join ', ')"
+                            }
+
+                            $controls
+                        }
+                        else {
+                            # Policy-specific requirements based on name
+                            if ($result.DisplayName -like "*MFA*") {
+                                "Requires: MFA"
+                            }
+                            elseif ($result.DisplayName -like "*Compliant*") {
+                                "Requires: Compliant device"
+                            }
+                            elseif ($result.DisplayName -like "*MDM*") {
+                                "Requires: MDM-enrolled device"
+                            }
+                            elseif ($result.DisplayName -like "*hybrid*") {
+                                "Requires: Hybrid joined device"
+                            }
+                            else {
+                                "Requires: MFA or device compliance"
+                            }
+                        }
+                    }
+                    elseif ($result.AccessResult -eq "Granted") {
+                        if ($result.SessionControlsApplied -and $result.SessionControlsApplied.Count -gt 0) {
+                            "Session: $($result.SessionControlsApplied -join ', ')"
+                        }
+                        else {
+                            ""
+                        }
+                    }
+                    else {
+                        ""
+                    }
                 }
 
                 # Truncate reason/controls if too long
@@ -968,9 +1012,31 @@ function Invoke-CAWhatIf {
                 }
                 Write-Host ("{0,-$resultWidth} " -f $resultText) -NoNewline -ForegroundColor $resultColor
 
-                # Reason/Controls
+                # Reason/Controls - simplify to hardcoded messages based on policy name
                 $reasonColor = if ($result.Applies) { "Yellow" } else { "DarkGray" }
-                Write-Host ("{0,-$reasonWidth}" -f $reasonOrControls) -ForegroundColor $reasonColor
+
+                # Hardcoded reason text based on policy name pattern for conditional policies
+                if ($result.Applies -and $result.AccessResult -eq "ConditionallyGranted") {
+                    if ($result.DisplayName -like "*MFA*") {
+                        $reasonText = "Requires: MFA"
+                    }
+                    elseif ($result.DisplayName -like "*Compliant*") {
+                        $reasonText = "Requires: Compliant device"
+                    }
+                    elseif ($result.DisplayName -like "*MDM*") {
+                        $reasonText = "Requires: MDM-enrolled device"
+                    }
+                    elseif ($result.DisplayName -like "*hybrid*") {
+                        $reasonText = "Requires: Hybrid joined device"
+                    }
+                    else {
+                        $reasonText = "Requires: MFA or device compliance"
+                    }
+                    Write-Host ("{0,-$reasonWidth}" -f $reasonText) -ForegroundColor $reasonColor
+                }
+                else {
+                    Write-Host ("{0,-$reasonWidth}" -f $reasonOrControls) -ForegroundColor $reasonColor
+                }
             }
 
             # Reset colors

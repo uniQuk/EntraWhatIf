@@ -101,37 +101,45 @@ function Get-OptimizedGroupMembership {
                     }
                 }
                 catch {
-                    # Check if this is a "Not Found" error (entity doesn't exist)
-                    if ($_.Exception.Response.StatusCode -eq "NotFound") {
+                    # Enhanced error logging and reporting
+                    $errorStatus = if ($_.Exception.Response) { $_.Exception.Response.StatusCode } else { "Unknown" }
+                    $errorMessage = $_.Exception.Message
+
+                    Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Error retrieving group memberships for user $entityId. Status: $errorStatus, Message: $errorMessage" -Level "Warning"
+
+                    # Special handling for common error cases
+                    if ($errorStatus -eq "NotFound") {
                         Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "User with ID $entityId not found. Returning empty group list." -Level "Warning"
-                        # Return empty array instead of throwing error
-                        $groups = @()
                     }
-                    else {
-                        $errorDetails = "Status: $($_.Exception.Response.StatusCode), Message: $($_.Exception.Message)"
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Error retrieving group membership: $errorDetails" -Level "Warning"
-                        # Return empty array for graceful fallback
-                        $groups = @()
+                    elseif ($errorMessage -like "*Authorization*" -or $errorMessage -like "*Permission*") {
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Permission issue when accessing user group memberships. Check that you have Directory.Read.All permission." -Level "Warning"
                     }
+
+                    # Always return empty array instead of throwing error
+                    $groups = @()
                 }
             }
             else {
                 # For service principals
                 try {
                     $uri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
-                    $groups = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop | Select-Object -ExpandProperty value
-                }
-                catch {
-                    # Check if this is a "Not Found" error (entity doesn't exist)
-                    if ($_.Exception.Response.StatusCode -eq "NotFound") {
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Service Principal with ID $entityId not found. Returning empty group list." -Level "Warning"
-                        # Return empty array instead of throwing error
-                        $groups = @()
+                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+
+                    if ($response.value) {
+                        $groups = $response.value
                     }
                     else {
-                        # For other errors, re-throw
-                        throw $_
+                        $groups = @()
                     }
+                }
+                catch {
+                    $errorStatus = if ($_.Exception.Response) { $_.Exception.Response.StatusCode } else { "Unknown" }
+                    $errorMessage = $_.Exception.Message
+
+                    Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Error retrieving group memberships for service principal $entityId. Status: $errorStatus, Message: $errorMessage" -Level "Warning"
+
+                    # Return empty array for all error cases
+                    $groups = @()
                 }
             }
 
@@ -142,7 +150,8 @@ function Get-OptimizedGroupMembership {
         catch {
             $errorMessage = $_.Exception.Message
             Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Failed to retrieve group memberships: $errorMessage" -Level "Error"
-            throw $_
+            # Return empty array instead of throwing
+            return @()
         }
     }
 

@@ -389,6 +389,12 @@ function Test-DevicePlatformInScope {
         [object]$DeviceContext
     )
 
+    # Extract platform information from DeviceContext
+    $devicePlatform = if ($DeviceContext -and $DeviceContext.Platform) { $DeviceContext.Platform } else { $null }
+
+    # Check if user explicitly specified a platform
+    $isPlatformExplicitlySpecified = $null -ne $devicePlatform
+
     # If no platform conditions specified, all platforms are in scope
     if (-not $Policy.Conditions.Platforms -or
         (-not $Policy.Conditions.Platforms.IncludePlatforms -and -not $Policy.Conditions.Platforms.ExcludePlatforms)) {
@@ -402,23 +408,26 @@ function Test-DevicePlatformInScope {
 
     $includePlatforms = $Policy.Conditions.Platforms.IncludePlatforms
     $excludePlatforms = $Policy.Conditions.Platforms.ExcludePlatforms
-    $devicePlatform = if ($DeviceContext) { $DeviceContext.DevicePlatform } else { $null }
 
     Write-Verbose "Testing platform scope for policy: $($Policy.DisplayName)"
     Write-Verbose "Device platform: $devicePlatform"
+    Write-Verbose "Include platforms: $($includePlatforms -join ', ')"
+    Write-Verbose "Exclude platforms: $($excludePlatforms -join ', ')"
+    Write-Verbose "Platform explicitly specified by user: $isPlatformExplicitlySpecified"
 
     # Check if platform is excluded
     if ($excludePlatforms -and $excludePlatforms.Count -gt 0) {
         # Handle special 'all' value for excludes
         if (Test-SpecialValue -Collection $excludePlatforms -ValueType "AllPlatforms") {
+            # If all platforms are excluded, no platform can match
             return @{
                 InScope = $false
                 Reason  = "All platforms excluded"
             }
         }
 
-        # Check if device platform is explicitly excluded
-        if ($devicePlatform -and $excludePlatforms -contains $devicePlatform) {
+        # If platform is explicitly specified, check if it's in the exclude list
+        if ($isPlatformExplicitlySpecified -and $excludePlatforms -contains $devicePlatform) {
             return @{
                 InScope = $false
                 Reason  = "Platform explicitly excluded: $devicePlatform"
@@ -430,31 +439,34 @@ function Test-DevicePlatformInScope {
     if ($includePlatforms -and $includePlatforms.Count -gt 0) {
         # Handle special 'all' value for includes
         if (Test-SpecialValue -Collection $includePlatforms -ValueType "AllPlatforms") {
+            # If all platforms are included, any platform matches
             return @{
                 InScope = $true
                 Reason  = "All platforms included"
             }
         }
 
-        # If device platform is not specified but specific platforms are required
-        if (-not $devicePlatform) {
-            return @{
-                InScope = $false
-                Reason  = "Device platform information required but not available"
+        # If platform is explicitly specified, check if it's in the include list
+        if ($isPlatformExplicitlySpecified) {
+            if ($includePlatforms -contains $devicePlatform) {
+                return @{
+                    InScope = $true
+                    Reason  = "Platform explicitly included: $devicePlatform"
+                }
             }
-        }
-
-        # Check if device platform is explicitly included
-        if ($includePlatforms -contains $devicePlatform) {
-            return @{
-                InScope = $true
-                Reason  = "Platform explicitly included: $devicePlatform"
+            else {
+                return @{
+                    InScope = $false
+                    Reason  = "Platform not included: $devicePlatform"
+                }
             }
         }
         else {
+            # If platform is not specified but we have includes, match Microsoft's behavior:
+            # When user only provides UserId with no platform, assume it matches the platform condition
             return @{
-                InScope = $false
-                Reason  = "Platform not included: $devicePlatform"
+                InScope = $true
+                Reason  = "Platform condition matches when platform not specified"
             }
         }
     }
