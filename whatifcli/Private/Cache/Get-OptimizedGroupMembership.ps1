@@ -84,21 +84,27 @@ function Get-OptimizedGroupMembership {
             if ($entityType -eq "user") {
                 # Use transitive member of to get all groups (direct and nested)
                 try {
-                    $uri = "/users/$entityId/transitiveMemberOf?`$select=id,displayName,description"
-                    Write-Verbose "Requesting group membership from Graph API: $uri"
-                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+                    $baseUri = "/users/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    $nextLink = $baseUri
 
-                    # Enhanced debugging to see the actual API response
-                    Write-Verbose "Graph API response received with $(($response.value).Count) groups"
+                    # Handle pagination to get ALL groups
+                    do {
+                        Write-Verbose "Requesting group membership from Graph API: $nextLink"
+                        $response = Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
 
-                    if ($response.value) {
-                        $groups = $response.value
-                        Write-Verbose "User is a member of these groups: $($groups.id -join ', ')"
-                    }
-                    else {
-                        Write-Verbose "No groups found for user $entityId"
-                        $groups = @()
-                    }
+                        # Enhanced debugging to see the actual API response
+                        Write-Verbose "Graph API response received with $(($response.value).Count) groups"
+
+                        if ($response.value) {
+                            $groups += $response.value
+                        }
+
+                        # Check if there are more pages
+                        $nextLink = $response.'@odata.nextLink'
+                    } while ($nextLink)
+
+                    Write-Verbose "Total groups retrieved: $($groups.Count)"
+                    Write-Verbose "User is a member of these groups: $($groups.id -join ', ')"
                 }
                 catch {
                     # Enhanced error logging and reporting
@@ -122,15 +128,20 @@ function Get-OptimizedGroupMembership {
             else {
                 # For service principals
                 try {
-                    $uri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
-                    $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+                    $baseUri = "/servicePrincipals/$entityId/transitiveMemberOf?`$select=id,displayName,description"
+                    $nextLink = $baseUri
 
-                    if ($response.value) {
-                        $groups = $response.value
-                    }
-                    else {
-                        $groups = @()
-                    }
+                    # Handle pagination to get ALL groups
+                    do {
+                        $response = Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
+
+                        if ($response.value) {
+                            $groups += $response.value
+                        }
+
+                        # Check if there are more pages
+                        $nextLink = $response.'@odata.nextLink'
+                    } while ($nextLink)
                 }
                 catch {
                     $errorStatus = if ($_.Exception.Response) { $_.Exception.Response.StatusCode } else { "Unknown" }
