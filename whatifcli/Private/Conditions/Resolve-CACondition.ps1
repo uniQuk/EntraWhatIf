@@ -1199,20 +1199,14 @@ function Test-ClientAppInScope {
         }
     }
 
-    # If client app type is not specified in the context
-    if (-not $ResourceContext.ClientAppType) {
-        Write-Verbose "No client app type specified in context, but will continue evaluation"
-        # If the policy has the 'all' special value (case-insensitive)
-        if ($Policy.Conditions.ClientAppTypes | Where-Object { $_ -ieq "all" }) {
-            Write-Verbose "Policy includes 'all' client app types"
-            return @{
-                InScope = $true
-                Reason  = "All client app types included by policy"
-            }
-        }
+    # If client app type is not specified in the context, be permissive
+    if ([string]::IsNullOrEmpty($ResourceContext.ClientAppType)) {
+        Write-Verbose "No client app type specified in context, using permissive matching"
+        # When no client app type is specified by the user, any policy with client app types should match
+        # This simulates the behavior of allowing the sign-in to match any client app type condition
         return @{
             InScope = $true
-            Reason  = "No client app type specified, default to in scope"
+            Reason  = "No client app type specified, permissive matching applied"
         }
     }
 

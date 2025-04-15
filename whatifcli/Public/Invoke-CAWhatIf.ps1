@@ -52,6 +52,7 @@ function Invoke-CAWhatIf {
 
     .PARAMETER ClientAppType
         The client application type (Browser, MobileAppsAndDesktopClients, ExchangeActiveSync, Other).
+        If not specified, the simulation will be permissive and match policies regardless of client app type conditions.
 
     .PARAMETER DevicePlatform
         The device platform (Windows, iOS, Android, macOS, Linux, Other).
@@ -168,7 +169,7 @@ function Invoke-CAWhatIf {
 
         [Parameter()]
         [ValidateSet('Browser', 'MobileAppsAndDesktopClients', 'ExchangeActiveSync', 'Other')]
-        [string]$ClientAppType = 'Browser',
+        [string]$ClientAppType = $null,
 
         [Parameter()]
         [ValidateSet('Windows', 'iOS', 'Android', 'macOS', 'Linux', 'Other')]
@@ -852,7 +853,7 @@ function Invoke-CAWhatIf {
             $paramSummary = "Parameters:"
             if ($AppId) { $paramSummary += " App=$AppId" }
             if ($DevicePlatform) { $paramSummary += " Platform=$DevicePlatform" }
-            if ($ClientAppType) { $paramSummary += " ClientApp=$ClientAppType" }
+            if (-not [string]::IsNullOrEmpty($ClientAppType)) { $paramSummary += " ClientApp=$ClientAppType" }
             if ($IpAddress) { $paramSummary += " IP=$IpAddress" }
             if ($DeviceCompliant -ne $false) { $paramSummary += " Compliant=$DeviceCompliant" }
             if ($MfaAuthenticated -ne $false) { $paramSummary += " MFA=$MfaAuthenticated" }
@@ -900,10 +901,10 @@ function Invoke-CAWhatIf {
                             default { 4 }
                         }
                     ) -PassThru
-                } | Sort-Object -Property AppliesSortOrder, StateSortOrder
+                } | Sort-Object -Property AppliesSortOrder, StateSortOrder, DisplayName
 
             # Define column widths
-            $nameWidth = 40
+            $nameWidth = 50
             $stateWidth = 12
             $appliesWidth = 10
             $conditionsWidth = 25
