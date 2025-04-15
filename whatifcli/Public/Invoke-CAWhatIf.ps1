@@ -383,7 +383,9 @@ function Invoke-CAWhatIf {
             if ((-not $UserGroups -or $UserGroups.Count -eq 0) -and $resolvedUser.Success) {
                 try {
                     Write-Verbose "Attempting to retrieve group memberships for user $UserGuid ($UserDisplayName)"
-                    $userGroupMemberships = Resolve-GroupMembership -UserId $UserGuid -IncludeNestedGroups
+
+                    # Always use ForceRefresh to avoid stale cache issues in large tenants
+                    $userGroupMemberships = Resolve-GroupMembership -UserId $UserGuid -IncludeNestedGroups -ForceRefresh
 
                     if ($userGroupMemberships.Success -and $userGroupMemberships.Groups.Count -gt 0) {
                         # Extract just the group IDs for the context
@@ -392,15 +394,53 @@ function Invoke-CAWhatIf {
                         Write-Verbose "Group IDs: $($UserGroups -join ', ')"
                     }
                     else {
-                        Write-Verbose "No groups found for user - this could cause issues with group-based policies"
-                        # Initialize as empty array instead of null
-                        $UserGroups = @()
+                        # Even if the operation failed, check if we got any groups
+                        if ($userGroupMemberships.Groups -and $userGroupMemberships.Groups.Count -gt 0) {
+                            $UserGroups = $userGroupMemberships.Groups | ForEach-Object { $_.Id }
+                            Write-Verbose "Retrieved $($UserGroups.Count) groups despite errors"
+                        }
+                        else {
+                            Write-Verbose "No groups found for user - this could cause issues with group-based policies"
+                            Write-Verbose "Error details: $($userGroupMemberships.Error)"
+                            # Initialize as empty array instead of null
+                            $UserGroups = @()
+
+                            # Try a direct approach as fallback
+                            Write-Verbose "Attempting direct group membership retrieval as fallback"
+                            try {
+                                $directGroups = Get-OptimizedGroupMembership -UserId $UserGuid -ForceRefresh
+                                if ($directGroups -and $directGroups.Count -gt 0) {
+                                    $UserGroups = $directGroups | ForEach-Object { $_.id }
+                                    Write-Verbose "Fallback retrieved $($UserGroups.Count) groups"
+                                }
+                            }
+                            catch {
+                                Write-Verbose "Fallback group retrieval also failed: $($_.Exception.Message)"
+                            }
+                        }
                     }
                 }
                 catch {
                     Write-Warning "Could not retrieve group memberships: $($_.Exception.Message)"
-                    # Initialize as empty array instead of null to avoid null reference errors
-                    $UserGroups = @()
+
+                    # Try a direct approach as fallback
+                    try {
+                        Write-Verbose "Attempting direct group membership retrieval as fallback"
+                        $directGroups = Get-OptimizedGroupMembership -UserId $UserGuid -ForceRefresh
+                        if ($directGroups -and $directGroups.Count -gt 0) {
+                            $UserGroups = $directGroups | ForEach-Object { $_.id }
+                            Write-Verbose "Fallback retrieved $($UserGroups.Count) groups"
+                        }
+                        else {
+                            # Initialize as empty array instead of null to avoid null reference errors
+                            $UserGroups = @()
+                        }
+                    }
+                    catch {
+                        Write-Verbose "Fallback group retrieval also failed: $($_.Exception.Message)"
+                        # Initialize as empty array instead of null to avoid null reference errors
+                        $UserGroups = @()
+                    }
                 }
             }
 
