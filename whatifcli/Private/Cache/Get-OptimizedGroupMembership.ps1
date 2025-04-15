@@ -91,13 +91,13 @@ function Get-OptimizedGroupMembership {
                     $pageCount = 0
                     do {
                         Write-Verbose "Requesting group membership from Graph API: $nextLink"
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Requesting page $($pageCount+1) of group memberships for $entityType $entityId" -Level "Debug"
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Requesting page $($pageCount+1) of group memberships for $entityType $entityId" -Level "Info"
                         $response = Invoke-MgGraphRequest -Method GET -Uri $nextLink -ErrorAction Stop
                         $pageCount++
 
                         # Enhanced debugging to see the actual API response
                         Write-Verbose "Graph API response received with $(($response.value).Count) groups"
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Page $pageCount returned $(($response.value).Count) groups" -Level "Debug"
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Page $pageCount returned $(($response.value).Count) groups" -Level "Info"
 
                         if ($response.value) {
                             $groups += $response.value
@@ -106,7 +106,7 @@ function Get-OptimizedGroupMembership {
                         # Check if there are more pages
                         $nextLink = $response.'@odata.nextLink'
                         if ($nextLink) {
-                            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Found next page link, continuing pagination" -Level "Debug"
+                            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Found next page link, continuing pagination" -Level "Info"
                         }
                     } while ($nextLink)
 
@@ -119,7 +119,7 @@ function Get-OptimizedGroupMembership {
                     else {
                         Write-Verbose "User is a member of these groups: $($groups.id -join ', ')"
                         $firstFiveGroups = $groups.id | Select-Object -First 5
-                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "First 5 group IDs: $($firstFiveGroups -join ', ')" -Level "Debug"
+                        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "First 5 group IDs: $($firstFiveGroups -join ', ')" -Level "Info"
                     }
                 }
                 catch {
@@ -173,7 +173,7 @@ function Get-OptimizedGroupMembership {
             # Update cache
             $script:GroupMembershipCache[$cacheKey] = $groups
             $script:GroupMembershipCacheTime[$cacheKey] = [DateTime]::Now
-            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Updated cache with $($groups.Count) groups for $entityType $entityId" -Level "Debug"
+            Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Updated cache with $($groups.Count) groups for $entityType $entityId" -Level "Info"
         }
         catch {
             $errorMessage = $_.Exception.Message
@@ -185,11 +185,11 @@ function Get-OptimizedGroupMembership {
 
     # Return all groups or filter by specified group IDs
     $memberOf = $script:GroupMembershipCache[$cacheKey]
-    Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Retrieved $($memberOf.Count) groups from cache for $entityType $entityId" -Level "Debug"
+    Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Retrieved $($memberOf.Count) groups from cache for $entityType $entityId" -Level "Info"
 
     if ($GroupIds -and $GroupIds.Count -gt 0) {
         $filteredGroups = $memberOf | Where-Object { $_.id -in $GroupIds }
-        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Filtered to $($filteredGroups.Count) out of $($GroupIds.Count) requested groups" -Level "Debug"
+        Write-DiagnosticOutput -Source "Get-OptimizedGroupMembership" -Message "Filtered to $($filteredGroups.Count) out of $($GroupIds.Count) requested groups" -Level "Info"
         return $filteredGroups
     }
     else {
