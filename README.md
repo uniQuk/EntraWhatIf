@@ -29,21 +29,21 @@ Unlike testing in production, whatifcli lets you simulate sign-in scenarios to u
 
 ```powershell
 # Install the module from PowerShell Gallery
-Install-Module -Name whatifcli -Scope CurrentUser
+Install-Module -Name EntraCAWhatIf -Scope CurrentUser
 
 # Import the module
-Import-Module whatifcli
+Import-Module EntraCAWhatIf
 ```
 
 ### Manual Installation
 
 ```powershell
 # Clone the repository
-git clone https://github.com/yourusername/whatifcli.git
+git clone https://github.com/uniQuk/whatifcli.git
 
 # Navigate to the directory and import the module
 cd whatifcli
-Import-Module .\whatifcli.psd1
+Import-Module ./whatifcli.psd1
 ```
 
 ## Prerequisites
@@ -53,8 +53,6 @@ Import-Module .\whatifcli.psd1
 
   - Microsoft.Graph.Authentication
   - Microsoft.Graph.Identity.SignIns
-  - Microsoft.Graph.Users
-  - Microsoft.Graph.Groups
 
 - **Required Microsoft Graph Permissions**:
   - Policy.Read.All (to read conditional access policies)
@@ -119,6 +117,13 @@ Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -OutputLevel "
 Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -OutputLevel "MicrosoftFormat" -AsJson
 ```
 
+### Enable Diagnostic Output
+
+```powershell
+# Enable verbose diagnostic information (cross-platform example)
+Invoke-CAWhatIf -UserId "john.doe@contoso.com" -Diagnostic -DiagnosticLogPath "/Users/youruser/diagnostic.log"
+```
+
 ## Advanced Usage
 
 ### Evaluate Specific Policies
@@ -133,13 +138,6 @@ Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -PolicyIds "po
 ```powershell
 # Simulate a sign-in with high risk
 Invoke-CAWhatIf -UserId "john.doe@contoso.com" -AppId "Office365" -SignInRiskLevel "High"
-```
-
-### Enable Diagnostic Output
-
-```powershell
-# Enable verbose diagnostic information
-Invoke-CAWhatIf -UserId "john.doe@contoso.com" -Diagnostic -DiagnosticLogPath "C:\Logs\diagnostic.log"
 ```
 
 ## Parameter Reference
@@ -166,6 +164,8 @@ Invoke-CAWhatIf -UserId "john.doe@contoso.com" -Diagnostic -DiagnosticLogPath "C
 | `OutputLevel`        | Level of detail in the output                             |
 | `Diagnostic`         | Enable diagnostic output                                  |
 
+> **Note:** Not all parameters are required. Some are mutually exclusive (e.g., `UserId` vs `ServicePrincipalId`).
+
 ## Examples of Output
 
 ### Table Format (Default)
@@ -177,6 +177,8 @@ MFA for All Users                          Report    Yes       U✓ A✓ P✓ N�
 Block Legacy Authentication                Enforce   No        U✓ A✗ P✓ N✓         Client app type not in scope
 Guest Access - Require MFA                 Enforce   No        U✗ A✓ P✓ N✓         User is not a guest
 ```
+
+> **Note:** Output formatting is for illustration purposes.
 
 ### Detailed Output
 
@@ -202,8 +204,8 @@ Policy: MFA for All Users
 
 Contributions to whatifcli are welcome and appreciated! Here's how you can contribute:
 
-1. **Report Bugs**: If you find a bug, please open an issue with details on how to reproduce it
-2. **Suggest Features**: Have an idea? Open an issue to suggest new features
+1. **Report Bugs**: If you find a bug, please [open an issue](https://github.com/uniQuk/whatifcli/issues) with details on how to reproduce it
+2. **Suggest Features**: Have an idea? [Open an issue](https://github.com/uniQuk/whatifcli/issues) to suggest new features
 3. **Submit Pull Requests**: Implement new features or fix bugs and submit a PR
 4. **Improve Documentation**: Help improve the documentation with clear examples and explanations
 
@@ -211,10 +213,10 @@ Please ensure your code follows the project's style and includes appropriate tes
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
 
 ## Acknowledgments
 
-- Microsoft Graph API documentation and team
+- [Microsoft Graph API documentation](https://learn.microsoft.com/graph/api/resources/conditionalaccessroot?view=graph-rest-beta) and team
 - PowerShell community
 - All contributors to this project
