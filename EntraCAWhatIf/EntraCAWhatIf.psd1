@@ -4,7 +4,7 @@
     RootModule        = 'EntraCAWhatIf.psm1'
 
     # Version number of this module.
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '0.1.1'
 
     # ID used to uniquely identify this module
     GUID              = '52f62b7a-8d7d-4f81-a260-72b2beee77af'
@@ -40,8 +40,8 @@
     FunctionsToExport = @(
         'Invoke-CAWhatIf',
         'Get-CAWhatIfReport',
-        'Resolve-UserIdentity',
-        'Resolve-GroupMembership'
+        'Test-TrustedLocation',
+        'Get-CAWhatIfDiagnostic'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -66,7 +66,7 @@
             ProjectUri   = 'https://github.com/uniQuk/EntraWhatIf'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'Initial release of the WhatIfCA module.'
+            ReleaseNotes = 'Fixed issue with platform condition evaluation when IP is in a trusted location and no platform is specified.'
         }
     }
 }

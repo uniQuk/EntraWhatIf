@@ -8,6 +8,8 @@ $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 # Dot source the public functions
 . "$PSScriptRoot\Public\Invoke-CAWhatIf.ps1"
 . "$PSScriptRoot\Public\Get-CAWhatIfReport.ps1"
+. "$PSScriptRoot\Public\Test-TrustedLocation.ps1"
+. "$PSScriptRoot\Public\Get-CAWhatIfDiagnostic.ps1"
 
 # Dot source private functions by category
 # Identity functions
@@ -41,7 +43,7 @@ $PSScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
 . "$PSScriptRoot\Private\Output\Write-DiagnosticOutput.ps1"
 
 # Export the public functions
-Export-ModuleMember -Function 'Invoke-CAWhatIf', 'Get-CAWhatIfReport'
+Export-ModuleMember -Function 'Invoke-CAWhatIf', 'Get-CAWhatIfReport', 'Test-TrustedLocation', 'Get-CAWhatIfDiagnostic'
 
 # Create an alias
 New-Alias -Name 'cawhatif' -Value 'Invoke-CAWhatIf'

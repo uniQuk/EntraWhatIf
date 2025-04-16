@@ -179,7 +179,27 @@ function Resolve-CACondition {
         }
     }
 
-    # 6. Check if network location is in scope
+    # 6. Check if device platform is in scope
+    # Add location context to device context for better platform/location integration
+    if (-not $DeviceContext.PSObject.Properties.Name -contains "LocationContext") {
+        $DeviceContext = $DeviceContext.PSObject.Copy()
+        Add-Member -InputObject $DeviceContext -MemberType NoteProperty -Name "LocationContext" -Value $LocationContext
+    }
+
+    $devicePlatformResult = Test-DevicePlatformInScope -Policy $Policy -DeviceContext $DeviceContext
+    $evaluationDetails.DevicePlatformInScope = $devicePlatformResult.InScope
+    $evaluationDetails.Reasons.DevicePlatform = $devicePlatformResult.Reason
+
+    if (-not $devicePlatformResult.InScope) {
+        Write-Verbose "Device platform not in scope for policy $($Policy.DisplayName): $($devicePlatformResult.Reason)"
+        return @{
+            Applies           = $false
+            EvaluationDetails = $evaluationDetails
+            Reason            = $devicePlatformResult.Reason
+        }
+    }
+
+    # 7. Check if network location is in scope
     $networkResult = Test-NetworkInScope -Policy $Policy -LocationContext $LocationContext
     $evaluationDetails.NetworkInScope = $networkResult.InScope
     $evaluationDetails.Reasons.Network = $networkResult.Reason
@@ -193,7 +213,7 @@ function Resolve-CACondition {
         }
     }
 
-    # 7. Check if client app is in scope
+    # 8. Check if client app is in scope
     $clientAppResult = Test-ClientAppInScope -Policy $Policy -ResourceContext $ResourceContext
     $evaluationDetails.ClientAppInScope = $clientAppResult.InScope
     $evaluationDetails.Reasons.ClientApp = $clientAppResult.Reason
@@ -204,20 +224,6 @@ function Resolve-CACondition {
             Applies           = $false
             EvaluationDetails = $evaluationDetails
             Reason            = $clientAppResult.Reason
-        }
-    }
-
-    # 8. Check if device platform is in scope
-    $devicePlatformResult = Test-DevicePlatformInScope -Policy $Policy -DeviceContext $DeviceContext
-    $evaluationDetails.DevicePlatformInScope = $devicePlatformResult.InScope
-    $evaluationDetails.Reasons.DevicePlatform = $devicePlatformResult.Reason
-
-    if (-not $devicePlatformResult.InScope) {
-        Write-Verbose "Device platform not in scope for policy $($Policy.DisplayName): $($devicePlatformResult.Reason)"
-        return @{
-            Applies           = $false
-            EvaluationDetails = $evaluationDetails
-            Reason            = $devicePlatformResult.Reason
         }
     }
 
@@ -1364,29 +1370,42 @@ function Test-DevicePlatformInScope {
         [object]$DeviceContext
     )
 
-    Write-Verbose "Testing device platform scope for policy: $($Policy.DisplayName)"
+    Write-Verbose "Testing platform scope for policy: $($Policy.DisplayName)"
     Write-Verbose "Device platform: $($DeviceContext.Platform)"
 
-    # Debug the platforms object type
-    $platformsType = if ($null -eq $Policy.Conditions.Platforms) { "null" } else { $Policy.Conditions.Platforms.GetType().Name }
-    Write-Verbose "Platforms condition type: $platformsType"
+    if ($DeviceContext.Platform) {
+        Write-Verbose "Platform explicitly specified by user: True"
+    }
+    else {
+        Write-Verbose "Platform explicitly specified by user: False"
+    }
+
+    # Debug the platforms condition
+    if ($Policy.Conditions.Platforms) {
+        if ($Policy.Conditions.Platforms.IncludePlatforms) {
+            Write-Verbose "Include platforms: $($Policy.Conditions.Platforms.IncludePlatforms -join ', ')"
+        }
+        if ($Policy.Conditions.Platforms.ExcludePlatforms) {
+            Write-Verbose "Exclude platforms: $($Policy.Conditions.Platforms.ExcludePlatforms -join ', ')"
+        }
+    }
 
     # If platforms is null in the policy, it means the condition is not set at all (equivalent to "All")
     if ($null -eq $Policy.Conditions.Platforms) {
-        Write-Verbose "Platforms condition is null in policy, all platforms in scope"
+        Write-Verbose "No platform conditions specified in policy, all platforms are in scope"
         return @{
             InScope = $true
-            Reason  = "No platform condition set (null)"
+            Reason  = "No platform conditions specified"
         }
     }
 
     # Handle case where Platforms is an empty object without Include/Exclude properties
     if (-not $Policy.Conditions.Platforms.PSObject.Properties.Name -contains "IncludePlatforms" -and
         -not $Policy.Conditions.Platforms.PSObject.Properties.Name -contains "ExcludePlatforms") {
-        Write-Verbose "Platforms condition has no include/exclude properties, all platforms in scope"
+        Write-Verbose "No platform conditions specified in policy, all platforms are in scope"
         return @{
             InScope = $true
-            Reason  = "No platform conditions specified (empty object)"
+            Reason  = "No platform conditions specified"
         }
     }
 
@@ -1396,29 +1415,30 @@ function Test-DevicePlatformInScope {
     # If no platforms specified in the conditions, platform is in scope
     if ((-not $includePlatforms -or $includePlatforms.Count -eq 0) -and
         (-not $excludePlatforms -or $excludePlatforms.Count -eq 0)) {
-        Write-Verbose "No specific platforms included or excluded, all platforms in scope"
+        Write-Verbose "No platform conditions specified in policy, all platforms are in scope"
         return @{
             InScope = $true
-            Reason  = "No specific platforms included or excluded"
+            Reason  = "No platform conditions specified"
         }
     }
 
     # Check if platform is explicitly excluded
-    if ($excludePlatforms -and $DeviceContext.Platform -and $DeviceContext.Platform -in $excludePlatforms) {
-        Write-Verbose "Platform explicitly excluded: $($DeviceContext.Platform)"
+    if ($excludePlatforms -and $DeviceContext.Platform -and $excludePlatforms -contains $DeviceContext.Platform) {
+        Write-Verbose "Platform '$($DeviceContext.Platform)' explicitly excluded"
         return @{
             InScope = $false
             Reason  = "Platform explicitly excluded"
         }
     }
 
-    # The logic for inclusion
-
-    # Check if all platforms are included using case-insensitive check
+    # Special value check for "all" in includePlatforms (case insensitive)
     if ($includePlatforms) {
+        $hasAllPlatforms = $false
         foreach ($platform in $includePlatforms) {
-            if ($platform -ieq "All") {
-                Write-Verbose "All platforms included in policy"
+            # Test for special value "all" with case-insensitive comparison
+            if ($platform -eq "all" -or $platform -eq "All" -or $platform -eq "ALL") {
+                $hasAllPlatforms = $true
+                Write-Verbose "Special value 'all' found for type 'AllPlatforms'"
                 return @{
                     InScope = $true
                     Reason  = "All platforms included"
@@ -1428,8 +1448,8 @@ function Test-DevicePlatformInScope {
     }
 
     # Check if platform is explicitly included
-    if ($includePlatforms -and $DeviceContext.Platform -and $DeviceContext.Platform -in $includePlatforms) {
-        Write-Verbose "Platform explicitly included: $($DeviceContext.Platform)"
+    if ($includePlatforms -and $DeviceContext.Platform -and $includePlatforms -contains $DeviceContext.Platform) {
+        Write-Verbose "Platform '$($DeviceContext.Platform)' explicitly included"
         return @{
             InScope = $true
             Reason  = "Platform explicitly included"
@@ -1437,19 +1457,44 @@ function Test-DevicePlatformInScope {
     }
     elseif ($includePlatforms -and $includePlatforms.Count -gt 0 -and $DeviceContext.Platform) {
         # If there are inclusion criteria but this platform doesn't match
-        Write-Verbose "Platform not in any inclusion list: $($DeviceContext.Platform)"
-        Write-Verbose "Policy requires one of: $($includePlatforms -join ', ')"
+        Write-Verbose "Platform '$($DeviceContext.Platform)' not in required platforms: $($includePlatforms -join ', ')"
         return @{
             InScope = $false
-            Reason  = "Platform '$($DeviceContext.Platform)' not in required platforms: $($includePlatforms -join ', ')"
+            Reason  = "Platform not in the required platforms"
         }
     }
     elseif ($includePlatforms -and $includePlatforms.Count -gt 0 -and -not $DeviceContext.Platform) {
         # If there are inclusion criteria but no platform specified
-        Write-Verbose "No platform specified in context, but policy requires specific platforms"
+        # This is more permissive and aligns with Microsoft's implementation
+        # when no specific platform is provided in the request
+
+        # Check if 'all' is in the include platforms (case insensitive)
+        foreach ($platform in $includePlatforms) {
+            if ($platform -eq "all" -or $platform -eq "All" -or $platform -eq "ALL") {
+                Write-Verbose "No platform specified but 'all' is included, so in scope"
+                return @{
+                    InScope = $true
+                    Reason  = "All platforms included"
+                }
+            }
+        }
+
+        # Special handling for trusted locations - if we're in a trusted location,
+        # be more permissive with platform requirements when none is specified
+        if ($DeviceContext.PSObject.Properties.Name -contains "LocationContext" -and
+            $DeviceContext.LocationContext -and
+            $DeviceContext.LocationContext.IsTrustedLocation -eq $true) {
+            Write-Verbose "No platform specified, but IP is in a trusted location, applying permissive evaluation"
+            return @{
+                InScope = $true
+                Reason  = "Trusted location with no platform specified"
+            }
+        }
+
+        Write-Verbose "No platform specified, but policy requires specific platforms"
         return @{
             InScope = $false
-            Reason  = "No platform specified in sign-in context"
+            Reason  = "No platform specified but policy requires specific platforms"
         }
     }
     else {
@@ -1457,7 +1502,7 @@ function Test-DevicePlatformInScope {
         Write-Verbose "No inclusion criteria for platforms, all platforms included by default"
         return @{
             InScope = $true
-            Reason  = "No inclusion criteria for platforms"
+            Reason  = "No platform inclusion criteria specified"
         }
     }
 }

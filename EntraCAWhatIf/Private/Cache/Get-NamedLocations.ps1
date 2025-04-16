@@ -119,21 +119,31 @@ function ProcessNamedLocation {
             $processedLocation.Type = "IP"
             $processedLocation.IsTrusted = $Location.AdditionalProperties.isTrusted
 
+            Write-Verbose "Processing IP named location: $($Location.DisplayName) (Trusted: $($processedLocation.IsTrusted))"
+
             # Process IP ranges
             if ($Location.AdditionalProperties.ipRanges) {
                 foreach ($range in $Location.AdditionalProperties.ipRanges) {
                     # Handle different IP range types (IPv4, IPv6)
                     if ($range.'@odata.type' -eq "#microsoft.graph.iPv4CidrRange") {
-                        $processedLocation.IpRanges += $range.cidrAddress
+                        $cidrAddress = $range.cidrAddress
+                        $processedLocation.IpRanges += $cidrAddress
+                        Write-Verbose "  Added IPv4 CIDR range: $cidrAddress"
                     }
                     elseif ($range.'@odata.type' -eq "#microsoft.graph.iPv6CidrRange") {
-                        $processedLocation.IpRanges += $range.cidrAddress
+                        $cidrAddress = $range.cidrAddress
+                        $processedLocation.IpRanges += $cidrAddress
+                        Write-Verbose "  Added IPv6 CIDR range: $cidrAddress"
                     }
                     elseif ($range.'@odata.type' -eq "#microsoft.graph.iPv4Range") {
-                        $processedLocation.IpRanges += "$($range.lowerAddress)-$($range.upperAddress)"
+                        $rangeAddress = "$($range.lowerAddress)-$($range.upperAddress)"
+                        $processedLocation.IpRanges += $rangeAddress
+                        Write-Verbose "  Added IPv4 range: $rangeAddress"
                     }
                     elseif ($range.'@odata.type' -eq "#microsoft.graph.iPv6Range") {
-                        $processedLocation.IpRanges += "$($range.lowerAddress)-$($range.upperAddress)"
+                        $rangeAddress = "$($range.lowerAddress)-$($range.upperAddress)"
+                        $processedLocation.IpRanges += $rangeAddress
+                        Write-Verbose "  Added IPv6 range: $rangeAddress"
                     }
                 }
             }
@@ -143,6 +153,10 @@ function ProcessNamedLocation {
             $processedLocation.Type = "CountryOrRegion"
             $processedLocation.CountryOrRegion = $Location.AdditionalProperties.countriesAndRegions
             $processedLocation.IncludeUnknownCountriesAndRegions = $Location.AdditionalProperties.includeUnknownCountriesAndRegions
+
+            Write-Verbose "Processing Country/Region named location: $($Location.DisplayName)"
+            Write-Verbose "  Countries/Regions: $($processedLocation.CountryOrRegion -join ', ')"
+            Write-Verbose "  Include Unknown: $($processedLocation.IncludeUnknownCountriesAndRegions)"
         }
 
         return $processedLocation

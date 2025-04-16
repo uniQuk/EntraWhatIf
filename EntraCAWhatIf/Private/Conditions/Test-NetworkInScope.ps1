@@ -69,57 +69,126 @@ function Test-NetworkInScope {
         Write-Verbose "Determined trust status from named location: $isTrustedLocation"
     }
 
-    # Case 1: Include "All" and exclude "AllTrusted" = All untrusted locations
-    if ((Test-SpecialValue -Collection $includeLocations -ValueType "AllLocations") -and
-        (Test-SpecialValue -Collection $excludeLocations -ValueType "AllTrustedLocations")) {
+    # If IP address is provided without trust status, check if it's in any trusted location
+    if ($ipAddress -and -not [bool]::TryParse($isTrustedLocation, [ref]$null)) {
+        $locationResult = Test-TrustedLocation -IpAddress $ipAddress
+        $isTrustedLocation = $locationResult.IsInTrustedLocation
+        Write-Verbose "Determined IP trust status by checking locations: $isTrustedLocation"
 
-        Write-Verbose "Special case: Include 'All' and exclude 'AllTrusted' = All untrusted locations"
+        # If IP is in a trusted location, add the first location ID to the context for future reference
+        if ($isTrustedLocation -and $locationResult.MatchingLocations.Count -gt 0 -and -not $namedLocationId) {
+            $namedLocationId = $locationResult.MatchingLocations[0].LocationId
+            Write-Verbose "Adding named location ID from trusted location check: $namedLocationId"
+        }
+    }
 
+    # Update the LocationContext with the verified trusted status and location ID if found
+    $LocationContext.IsTrustedLocation = $isTrustedLocation
+    if ($namedLocationId) {
+        $LocationContext.NamedLocationId = $namedLocationId
+    }
+
+    # Check for ExcludeTrustedLocations flag in the conditions
+    # This should be evaluated immediately with no special cases
+    $excludeTrustedLocations = $Policy.Conditions.Locations.ExcludeTrustedLocations
+    if ($excludeTrustedLocations) {
         if ($isTrustedLocation) {
+            Write-Verbose "Policy excludes trusted locations and current location is trusted"
             return @{
                 InScope = $false
-                Reason  = "Trusted location excluded when policy includes all locations but excludes trusted locations"
+                Reason  = "Policy excludes trusted locations and current location is trusted"
             }
         }
-        else {
-            return @{
-                InScope = $true
-                Reason  = "Untrusted location included when policy includes all locations but excludes trusted locations"
-            }
-        }
+        # If location is not trusted, we continue with normal evaluation
+        # Do not add any automatic InScope=true here
+        Write-Verbose "Policy excludes trusted locations but current location is not a trusted location"
     }
 
-    # Case 2: Include "All" with no exclusions = All locations
-    if ((Test-SpecialValue -Collection $includeLocations -ValueType "AllLocations") -and
-        ($null -eq $excludeLocations -or $excludeLocations.Count -eq 0)) {
-
-        Write-Verbose "Special case: Include 'All' with no exclusions = All locations"
-
-        return @{
-            InScope = $true
-            Reason  = "All locations included with no exclusions"
-        }
-    }
-
-    # Case 3: Include "AllTrusted" = Only trusted locations
-    if (Test-SpecialValue -Collection $includeLocations -ValueType "AllTrustedLocations") {
-        Write-Verbose "Special case: Include 'AllTrusted' = Only trusted locations"
-
-        if ($isTrustedLocation) {
-            return @{
-                InScope = $true
-                Reason  = "Trusted location included when policy includes all trusted locations"
-            }
-        }
-        else {
+    # Special values check before checking specific named locations
+    if ($excludeLocations) {
+        # Check for "All" exclusion
+        if ($excludeLocations -contains "All") {
+            Write-Verbose "All locations excluded"
             return @{
                 InScope = $false
-                Reason  = "Untrusted location excluded when policy includes only trusted locations"
+                Reason  = "All locations excluded"
+            }
+        }
+
+        # Check for "AllTrusted" exclusion
+        if ($excludeLocations -contains "AllTrusted") {
+            if ($isTrustedLocation) {
+                Write-Verbose "All trusted locations excluded and IP is in a trusted location"
+                return @{
+                    InScope = $false
+                    Reason  = "All trusted locations excluded and IP is in a trusted location"
+                }
+            }
+            else {
+                Write-Verbose "All trusted locations excluded but IP is not in a trusted location (passes this check)"
+                # Continue evaluation - we don't return here
             }
         }
     }
 
-    # Check if location is excluded
+    # Check for special values in include locations
+    if ($includeLocations) {
+        # Check for "All" inclusion
+        if ($includeLocations -contains "All") {
+            # Special case: All included but AllTrusted excluded
+            if ($excludeLocations -and $excludeLocations -contains "AllTrusted") {
+                if ($isTrustedLocation) {
+                    Write-Verbose "All locations included but trusted locations excluded, and IP is in a trusted location"
+                    return @{
+                        InScope = $false
+                        Reason  = "All locations included except trusted locations, and IP is in a trusted location"
+                    }
+                }
+                else {
+                    Write-Verbose "All locations included but trusted locations excluded, and IP is not in a trusted location"
+                    return @{
+                        InScope = $true
+                        Reason  = "All locations included except trusted locations, and IP is not in a trusted location"
+                    }
+                }
+            }
+
+            # If "All" is included but there are exclusions, continue to check those
+            if (-not $excludeLocations -or $excludeLocations.Count -eq 0) {
+                Write-Verbose "All locations included and no exclusions"
+                return @{
+                    InScope = $true
+                    Reason  = "All locations included"
+                }
+            }
+        }
+
+        # Check for "AllTrusted" inclusion
+        if ($includeLocations -contains "AllTrusted") {
+            if ($isTrustedLocation) {
+                # If the location is trusted and "AllTrusted" is included, check if there are specific exclusions
+                if (-not $excludeLocations -or $excludeLocations.Count -eq 0) {
+                    Write-Verbose "All trusted locations included, no exclusions, and IP is in a trusted location"
+                    return @{
+                        InScope = $true
+                        Reason  = "All trusted locations included"
+                    }
+                }
+            }
+            else {
+                # If "AllTrusted" is the only inclusion but the location is not trusted, it's not in scope
+                if ($includeLocations.Count -eq 1) {
+                    Write-Verbose "Only trusted locations are included, but IP is not in a trusted location"
+                    return @{
+                        InScope = $false
+                        Reason  = "IP not in a trusted location"
+                    }
+                }
+            }
+        }
+    }
+
+    # Check against excluded named locations
     if ($excludeLocations -and $excludeLocations.Count -gt 0) {
         # Check if named location ID is explicitly excluded
         if ($namedLocationId -and $excludeLocations -contains $namedLocationId) {
@@ -180,8 +249,9 @@ function Test-NetworkInScope {
             $isIncluded = $true
             $includeReason = "Named location explicitly included"
         }
-        else {
-            # Check each included location
+
+        # Check each included location if we haven't found a match yet
+        if (-not $isIncluded) {
             foreach ($locationId in $includeLocations) {
                 # Skip special values which were handled above
                 if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
@@ -219,7 +289,6 @@ function Test-NetworkInScope {
         }
     }
 
-    # Determine final result
     if ($isIncluded) {
         return @{
             InScope = $true
@@ -227,9 +296,32 @@ function Test-NetworkInScope {
         }
     }
     else {
+        # Provide more specific reason based on what information was provided
+        $specificReason = if ($ipAddress) {
+            if ($isTrustedLocation -eq $true) {
+                "IP address $ipAddress is in a trusted location but not included in policy scope"
+            }
+            elseif ($isTrustedLocation -eq $false) {
+                "IP address $ipAddress is not in any included location/network"
+            }
+            else {
+                "IP address $ipAddress not found in any included locations"
+            }
+        }
+        elseif ($namedLocationId) {
+            "Named location '$namedLocationId' not in any inclusion lists"
+        }
+        elseif ($countryCode) {
+            "Country '$countryCode' not in any inclusion lists"
+        }
+        else {
+            "Location not in any inclusion lists"
+        }
+
+        Write-Verbose $specificReason
         return @{
             InScope = $false
-            Reason  = "Location not in any inclusion lists"
+            Reason  = $specificReason
         }
     }
 }
