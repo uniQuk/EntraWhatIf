@@ -4,7 +4,7 @@
     RootModule        = 'EntraCAWhatIf.psm1'
 
     # Version number of this module.
-    ModuleVersion     = '0.1.3'
+    ModuleVersion     = '0.1.4'
 
     # ID used to uniquely identify this module
     GUID              = '52f62b7a-8d7d-4f81-a260-72b2beee77af'
@@ -66,7 +66,7 @@
             ProjectUri   = 'https://github.com/uniQuk/EntraWhatIf'
 
             # ReleaseNotes of this module
-            ReleaseNotes = 'Fixed issue with Location logic when none supplied and policy contains "All" in the conditions.'
+            ReleaseNotes = 'Improve Location logic for Named locations with Countries to match the Azure Portal.'
         }
     }
 }

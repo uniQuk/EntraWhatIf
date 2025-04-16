@@ -60,6 +60,9 @@ function Test-NetworkInScope {
     Write-Verbose "Testing network scope for policy: $($Policy.DisplayName)"
     Write-Verbose "IP: $ipAddress, Named Location ID: $namedLocationId, Country: $countryCode, Trusted: $isTrustedLocation"
 
+    # Get all named locations
+    $namedLocations = Get-NamedLocations
+
     # When only user ID is provided (no network context), be more permissive
     # Microsoft's behavior in this case is to assume a location that matches the policy
     if (-not $ipAddress -and -not $namedLocationId -and -not $countryCode -and -not [bool]::TryParse($isTrustedLocation, [ref]$null)) {
@@ -74,10 +77,41 @@ function Test-NetworkInScope {
                 }
             }
         }
-    }
 
-    # Get all named locations
-    $namedLocations = Get-NamedLocations
+        # Check for country-based named locations when no location info is provided
+        # Microsoft treats user-only queries as matching any country-based policy
+        foreach ($locationId in $includeLocations) {
+            # Skip special values
+            if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
+                continue
+            }
+
+            # Check if the location exists in our cache
+            if (-not $namedLocations.ContainsKey($locationId)) {
+                Write-Verbose "Included location ID '$locationId' not found in cache, skipping"
+                continue
+            }
+
+            $location = $namedLocations[$locationId]
+
+            # Check if this is a country/region location
+            # Microsoft treats user-only queries as matching ANY country location, not just those with includeUnknownCountriesAndRegions=true
+            if ($location.Type -eq "CountryOrRegion") {
+                Write-Verbose "Country location '$($location.DisplayName)' included and no location info provided"
+
+                # Check if the location is excluded by AllTrusted
+                if ($excludeLocations -contains "AllTrusted" -and $location.IsTrusted) {
+                    Write-Verbose "Location is trusted but AllTrusted is excluded"
+                    continue
+                }
+
+                return @{
+                    InScope = $true
+                    Reason  = "Country location included and no location specified"
+                }
+            }
+        }
+    }
 
     # If named location ID is provided but no trust status, determine it
     if ($namedLocationId -and -not [bool]::TryParse($isTrustedLocation, [ref]$null)) {
@@ -309,9 +343,28 @@ function Test-NetworkInScope {
     # If we got this far and have no specific network info, be more permissive with location criteria
     if (-not $isIncluded && -not $ipAddress && -not $namedLocationId && -not $countryCode) {
         Write-Verbose "No network information provided, assuming this is a user-only query"
-        if ($includeLocations -contains "All") {
-            $isIncluded = $true
-            $includeReason = "All locations included in a user-only query"
+
+        # Already checked for country-based locations and "All" above, so this is a fallback
+        # for any other type of location-based policies
+        foreach ($locationId in $includeLocations) {
+            # Skip special values which were handled above
+            if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
+                continue
+            }
+
+            # Check if the location exists in our cache
+            if (-not $namedLocations.ContainsKey($locationId)) {
+                continue
+            }
+
+            $location = $namedLocations[$locationId]
+
+            # Check if this is a country location
+            if ($location.Type -eq "CountryOrRegion") {
+                $isIncluded = $true
+                $includeReason = "Country-based location with no location specified"
+                break
+            }
         }
     }
 
