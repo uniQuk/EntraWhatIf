@@ -4,7 +4,7 @@
     RootModule        = 'EntraCAWhatIf.psm1'
 
     # Version number of this module.
-    ModuleVersion     = '0.1.1'
+    ModuleVersion     = '0.1.2'
 
     # ID used to uniquely identify this module
     GUID              = '52f62b7a-8d7d-4f81-a260-72b2beee77af'
