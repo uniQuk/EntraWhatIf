@@ -1,8 +1,8 @@
 {
     "module": "EntraCAWhatIf",
     "publishSettings": {
-        "version": "0.1.2",
+        "version": "0.1.3",
         "publishThisVersion": true,
-        "releaseNotes": "Improve guest targetting logic"
+        "releaseNotes": "Improve Location logic."
     }
 }

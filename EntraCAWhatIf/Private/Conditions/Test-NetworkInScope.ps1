@@ -60,6 +60,22 @@ function Test-NetworkInScope {
     Write-Verbose "Testing network scope for policy: $($Policy.DisplayName)"
     Write-Verbose "IP: $ipAddress, Named Location ID: $namedLocationId, Country: $countryCode, Trusted: $isTrustedLocation"
 
+    # When only user ID is provided (no network context), be more permissive
+    # Microsoft's behavior in this case is to assume a location that matches the policy
+    if (-not $ipAddress -and -not $namedLocationId -and -not $countryCode -and -not [bool]::TryParse($isTrustedLocation, [ref]$null)) {
+        # If "All" is included, policy should apply when no network information is supplied
+        if ($includeLocations -contains "All") {
+            # Only if AllTrusted is not in exclusions
+            if (-not ($excludeLocations -contains "AllTrusted")) {
+                Write-Verbose "All locations included and no network info provided, assuming match"
+                return @{
+                    InScope = $true
+                    Reason  = "All locations included, no network info specified"
+                }
+            }
+        }
+    }
+
     # Get all named locations
     $namedLocations = Get-NamedLocations
 
@@ -286,6 +302,16 @@ function Test-NetworkInScope {
                     }
                 }
             }
+        }
+    }
+
+    # ADDED: Special case for user-only queries with no network info
+    # If we got this far and have no specific network info, be more permissive with location criteria
+    if (-not $isIncluded && -not $ipAddress && -not $namedLocationId && -not $countryCode) {
+        Write-Verbose "No network information provided, assuming this is a user-only query"
+        if ($includeLocations -contains "All") {
+            $isIncluded = $true
+            $includeReason = "All locations included in a user-only query"
         }
     }
 
