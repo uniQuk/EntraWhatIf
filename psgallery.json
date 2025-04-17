@@ -1,8 +1,8 @@
 {
     "module": "EntraCAWhatIf",
     "publishSettings": {
-        "version": "0.1.4",
+        "version": "0.1.5",
         "publishThisVersion": true,
-        "releaseNotes": "Improve Location logic for Named locations with Countries to match the Azure Portal."
+        "releaseNotes": "Improve Location logic for additional edge cases."
     }
 }

@@ -203,13 +203,64 @@ function Test-NetworkInScope {
                 }
             }
 
-            # If "All" is included but there are exclusions, continue to check those
-            if (-not $excludeLocations -or $excludeLocations.Count -eq 0) {
-                Write-Verbose "All locations included and no exclusions"
-                return @{
-                    InScope = $true
-                    Reason  = "All locations included"
+            # If "All" is included with specific named locations in exclusions, we need to check if IP is in any of those
+            if ($excludeLocations -and $excludeLocations.Count -gt 0) {
+                $isExcluded = $false
+
+                # First check if IP is in any excluded named location
+                foreach ($locationId in $excludeLocations) {
+                    # Skip special values
+                    if ($locationId -eq "All" -or $locationId -eq "AllTrusted") {
+                        continue
+                    }
+
+                    # Check if the location exists in our cache
+                    if (-not $namedLocations.ContainsKey($locationId)) {
+                        Write-Verbose "Excluded location ID '$locationId' not found in cache, skipping"
+                        continue
+                    }
+
+                    $excludedLocation = $namedLocations[$locationId]
+
+                    # Check if IP matches an excluded location
+                    if ($ipAddress -and $excludedLocation.Type -eq "IP") {
+                        if (Test-LocationContainsIp -NamedLocation $excludedLocation -IpAddress $ipAddress) {
+                            $isExcluded = $true
+                            Write-Verbose "IP address '$ipAddress' in excluded named location '$($excludedLocation.DisplayName)'"
+                            break
+                        }
+                    }
+                    # Check if country code matches an excluded location
+                    elseif ($countryCode -and $excludedLocation.Type -eq "CountryOrRegion") {
+                        if (Test-LocationContainsCountry -NamedLocation $excludedLocation -CountryCode $countryCode) {
+                            $isExcluded = $true
+                            Write-Verbose "Country code '$countryCode' in excluded named location '$($excludedLocation.DisplayName)'"
+                            break
+                        }
+                    }
                 }
+
+                if ($isExcluded) {
+                    return @{
+                        InScope = $false
+                        Reason  = "All locations included but IP is in a specific excluded location"
+                    }
+                }
+                else {
+                    # IP is not in any excluded location, so it's in scope
+                    Write-Verbose "All locations included and IP is not in any excluded location"
+                    return @{
+                        InScope = $true
+                        Reason  = "All locations included and IP is not in any excluded location"
+                    }
+                }
+            }
+
+            # If "All" is included but there are no exclusions
+            Write-Verbose "All locations included and no exclusions"
+            return @{
+                InScope = $true
+                Reason  = "All locations included"
             }
         }
 
